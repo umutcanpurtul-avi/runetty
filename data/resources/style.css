@@ -428,3 +428,32 @@ button.retry {
 }
 
 button.retry:hover { background-color: @bg_hover; }
+
+/* --- klasor satiri --- */
+
+.folder-header {
+  padding: 0 6px 0 0;
+}
+
+button.folder-action {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  color: @fg_tertiary;
+  opacity: 0;
+}
+
+/* Dugmeler satirin ustune gelince beliriyor: liste sakin kaliyor. */
+.folder-header:hover button.folder-action,
+button.folder-action:focus {
+  opacity: 1;
+}
+
+button.folder-action:hover {
+  background-color: @bg_hover;
+  color: @fg_primary;
+}

@@ -150,6 +150,34 @@ impl Store {
         self.save();
     }
 
+    /// Klasor adini degistirir; icindeki kayitlar yeni adi alir.
+    pub fn rename_folder(&mut self, old: &str, new: &str) {
+        let new = new.trim();
+        if new.is_empty() || new == old {
+            return;
+        }
+
+        for host in self.file.hosts.iter_mut() {
+            if host.folder.as_deref() == Some(old) {
+                host.folder = Some(new.to_string());
+            }
+        }
+
+        for folder in self.file.folders.values_mut() {
+            if folder == old {
+                *folder = new.to_string();
+            }
+        }
+
+        for folder in self.file.empty_folders.iter_mut() {
+            if folder == old {
+                *folder = new.to_string();
+            }
+        }
+
+        self.save();
+    }
+
     pub fn remove_folder(&mut self, name: &str) {
         self.file.empty_folders.retain(|folder| folder != name);
         for host in self.file.hosts.iter_mut() {
@@ -357,6 +385,19 @@ mod tests {
 
         assert!(store.remove("box"));
         assert!(store.hosts().is_empty());
+    }
+
+    #[test]
+    fn renaming_a_folder_moves_its_hosts() {
+        let mut local = local("box");
+        local.folder = Some("lab".into());
+        let mut store = store(vec![local], Vec::new());
+        store.add_folder("lab");
+
+        store.rename_folder("lab", "yeni-lab");
+
+        assert_eq!(store.hosts()[0].folder.as_deref(), Some("yeni-lab"));
+        assert_eq!(store.folders(), vec!["yeni-lab".to_string()]);
     }
 
     #[test]

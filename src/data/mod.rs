@@ -7,6 +7,7 @@
 //!
 //! Plandaki karar: baglanti alanlari ssh config'e, gorunum alanlari TOML'a.
 
+pub mod hostkey;
 pub mod metrics;
 pub mod secrets;
 pub mod settings;

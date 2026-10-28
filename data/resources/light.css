@@ -1,0 +1,102 @@
+/* Acik palet.
+ * style.css yapiyi ve koyu paleti tutuyor; bu dosya yalnizca renkleri
+ * yeniden tanimliyor ve koyu temaya ozgu birkac yeri duzeltiyor.
+ * Ayri dosya olmasinin sebebi GTK 4.14: `@define-color` kosullu olamiyor,
+ * CSS degiskenleri ise 4.16'dan once yok. Iki saglayici en tasinabilir yol.
+ */
+
+@define-color bg_base        #f6f6f9;
+@define-color bg_sidebar     #eceef3;
+@define-color bg_rail        #e4e7ee;
+@define-color bg_elevated    #ffffff;
+@define-color bg_hover       alpha(#000000, 0.05);
+@define-color bg_active      alpha(#000000, 0.09);
+@define-color hairline       alpha(#000000, 0.10);
+
+@define-color fg_primary     #15161a;
+@define-color fg_secondary   #555b68;
+@define-color fg_tertiary    #868c99;
+
+@define-color accent         #2f63e8;
+@define-color state_blocked  #b26a00;
+@define-color state_working  #2563eb;
+@define-color state_done     #15803d;
+@define-color state_idle     #8b909c;
+
+@define-color state_open     #15803d;
+@define-color state_trouble  #b26a00;
+@define-color state_closed   #c2342b;
+
+@define-color window_bg_color      @bg_base;
+@define-color window_fg_color      @fg_primary;
+@define-color view_bg_color        @bg_base;
+@define-color view_fg_color        @fg_primary;
+@define-color headerbar_bg_color   @bg_sidebar;
+@define-color headerbar_fg_color   @fg_primary;
+@define-color popover_bg_color     @bg_elevated;
+@define-color popover_fg_color     @fg_primary;
+@define-color card_bg_color        @bg_elevated;
+@define-color dialog_bg_color      @bg_elevated;
+@define-color accent_bg_color      @accent;
+@define-color accent_color         @accent;
+
+:root {
+  --window-bg-color:    #f6f6f9;
+  --window-fg-color:    #15161a;
+  --view-bg-color:      #f6f6f9;
+  --view-fg-color:      #15161a;
+  --headerbar-bg-color: #eceef3;
+  --headerbar-fg-color: #15161a;
+  --popover-bg-color:   #ffffff;
+  --popover-fg-color:   #15161a;
+  --dialog-bg-color:    #ffffff;
+  --dialog-fg-color:    #15161a;
+  --card-bg-color:      #ffffff;
+  --card-fg-color:      #15161a;
+  --accent-bg-color:    #2f63e8;
+  --accent-color:       #2f63e8;
+}
+
+/* Zemin gecisi acik temada cok daha hafif olmali; koyu temadaki degerler
+ * beyaz uzerinde kirli bir leke gibi duruyor. */
+.content-bg {
+  background-color: @bg_base;
+  background-image:
+    radial-gradient(ellipse farthest-corner at 30% 18%,
+                    alpha(#2f63e8, 0.06) 0%, transparent 62%),
+    radial-gradient(ellipse farthest-corner at 76% 72%,
+                    alpha(#8b5cf6, 0.05) 0%, transparent 58%);
+}
+
+/* Koyu temada beyaz saydamlikla kurulan yuzeyler, acik temada siyahla. */
+.global-search,
+.command-field,
+.chip,
+.sidebar-footer entry,
+.sidebar-footer button {
+  background-color: alpha(#000000, 0.04);
+}
+
+.keycap,
+.badge,
+.shortcut {
+  background-color: alpha(#000000, 0.06);
+}
+
+.status-dot.closed { background-color: alpha(#c2342b, 0.45); }
+
+.icon-rail button:checked,
+.icon-rail button:active {
+  background-color: @accent;
+  color: #ffffff;
+}
+
+popover > contents,
+popover.menu > contents {
+  box-shadow: 0 8px 24px alpha(#000000, 0.18);
+}
+
+.drag-ghost,
+.monitor-card {
+  box-shadow: 0 1px 2px alpha(#000000, 0.08);
+}

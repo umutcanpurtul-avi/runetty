@@ -2,6 +2,7 @@
 <gresources>
   <gresource prefix="/dev/runetty/Runetty">
     <file compressed="true">style.css</file>
+    <file compressed="true">light.css</file>
   </gresource>
   <!-- GtkApplication, resource_base_path + "/icons" yolunu ikon temasina
        kendisi ekler; dosya adlari prefix'e eklendigi icin alias sart. -->

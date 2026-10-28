@@ -259,3 +259,284 @@ DISK
         assert_eq!(cpu_percent(Some(previous), current), None);
     }
 }
+
+/// Detay sayfasinin olcumu. Kart olcumunun ustune disk listesi, ag sayaclari
+/// ve en yuklu surecleri ekliyor; yine tek komut, yine ayni kalici kanal.
+pub const DETAIL_PROBE: &str = "\
+printf 'STAT\\n'; head -1 /proc/stat; \
+printf 'MEM\\n'; grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo; \
+printf 'UP\\n'; cut -d' ' -f1 /proc/uptime; \
+printf 'CPUS\\n'; nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo; \
+printf 'LOAD\\n'; cut -d' ' -f1-3 /proc/loadavg; \
+printf 'DISKS\\n'; df -P -x tmpfs -x devtmpfs -x squashfs 2>/dev/null | tail -n +2; \
+printf 'NET\\n'; tail -n +3 /proc/net/dev; \
+printf 'PROCS\\n'; ps -eo pcpu,pmem,pid,comm --sort=-pcpu 2>/dev/null | tail -n +2 | head -10";
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Disk {
+    pub mount: String,
+    pub total_kb: u64,
+    pub used_kb: u64,
+    pub used_percent: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Interface {
+    pub name: String,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Process {
+    pub cpu: f64,
+    pub mem: f64,
+    pub pid: u32,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Detail {
+    pub sample: Sample,
+    pub swap_total_kb: u64,
+    pub swap_free_kb: u64,
+    pub load: [f64; 3],
+    pub disks: Vec<Disk>,
+    pub interfaces: Vec<Interface>,
+    pub processes: Vec<Process>,
+}
+
+impl Detail {
+    pub fn swap_percent(&self) -> f64 {
+        if self.swap_total_kb == 0 {
+            return 0.0;
+        }
+        let used = self.swap_total_kb.saturating_sub(self.swap_free_kb);
+        used as f64 * 100.0 / self.swap_total_kb as f64
+    }
+}
+
+pub fn parse_detail(output: &str) -> Option<Detail> {
+    let sample = parse(output)?;
+
+    let mut section = "";
+    let mut swap_total = 0;
+    let mut swap_free = 0;
+    let mut load = [0.0; 3];
+    let mut disks = Vec::new();
+    let mut interfaces = Vec::new();
+    let mut processes = Vec::new();
+
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(name) = section_name(line) {
+            section = name;
+            continue;
+        }
+
+        match section {
+            "mem" => {
+                let value = field(line, 1).and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+                if line.starts_with("SwapTotal") {
+                    swap_total = value;
+                } else if line.starts_with("SwapFree") {
+                    swap_free = value;
+                }
+            }
+            "load" => {
+                for (index, value) in line.split_whitespace().take(3).enumerate() {
+                    load[index] = value.parse().unwrap_or(0.0);
+                }
+            }
+            "disks" => {
+                if let Some(disk) = parse_disk(line) {
+                    disks.push(disk);
+                }
+            }
+            "net" => {
+                if let Some(interface) = parse_interface(line) {
+                    interfaces.push(interface);
+                }
+            }
+            "procs" => {
+                if let Some(process) = parse_process(line) {
+                    processes.push(process);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Some(Detail {
+        sample,
+        swap_total_kb: swap_total,
+        swap_free_kb: swap_free,
+        load,
+        disks,
+        interfaces,
+        processes,
+    })
+}
+
+fn section_name(line: &str) -> Option<&'static str> {
+    match line {
+        "STAT" => Some("stat"),
+        "MEM" => Some("mem"),
+        "UP" => Some("up"),
+        "CPUS" => Some("cpus"),
+        "LOAD" => Some("load"),
+        "DISKS" => Some("disks"),
+        "NET" => Some("net"),
+        "PROCS" => Some("procs"),
+        _ => None,
+    }
+}
+
+fn field(line: &str, index: usize) -> Option<&str> {
+    line.split_whitespace().nth(index)
+}
+
+fn parse_disk(line: &str) -> Option<Disk> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() < 6 {
+        return None;
+    }
+
+    Some(Disk {
+        total_kb: fields[1].parse().ok()?,
+        used_kb: fields[2].parse().ok()?,
+        used_percent: fields[4].trim_end_matches('%').parse().ok()?,
+        // Bagli dizin bosluk icerebilir; kalan alanlari geri birlestir.
+        mount: fields[5..].join(" "),
+    })
+}
+
+fn parse_interface(line: &str) -> Option<Interface> {
+    let (name, rest) = line.split_once(':')?;
+    let name = name.trim();
+    if name == "lo" {
+        return None;
+    }
+
+    let values: Vec<&str> = rest.split_whitespace().collect();
+    // /proc/net/dev: rx 8 sutun, sonra tx 8 sutun.
+    Some(Interface {
+        name: name.to_string(),
+        rx_bytes: values.first()?.parse().ok()?,
+        tx_bytes: values.get(8)?.parse().ok()?,
+    })
+}
+
+fn parse_process(line: &str) -> Option<Process> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() < 4 {
+        return None;
+    }
+
+    Some(Process {
+        cpu: fields[0].parse().ok()?,
+        mem: fields[1].parse().ok()?,
+        pid: fields[2].parse().ok()?,
+        name: fields[3..].join(" "),
+    })
+}
+
+/// "5.8 GB", "812 MB"
+pub fn human_kb(kilobytes: u64) -> String {
+    const UNITS: [(&str, f64); 4] = [
+        ("TB", 1_073_741_824.0),
+        ("GB", 1_048_576.0),
+        ("MB", 1_024.0),
+        ("kB", 1.0),
+    ];
+
+    let value = kilobytes as f64;
+    for (unit, scale) in UNITS {
+        if value >= scale {
+            let scaled = value / scale;
+            return if scaled >= 100.0 {
+                format!("{scaled:.0} {unit}")
+            } else {
+                format!("{scaled:.1} {unit}")
+            };
+        }
+    }
+
+    "0 kB".into()
+}
+
+pub fn detail_args(target: &str) -> Vec<String> {
+    let mut args = probe_args(target);
+    args.pop();
+    args.push(DETAIL_PROBE.into());
+    args
+}
+
+#[cfg(test)]
+mod detail_tests {
+    use super::*;
+
+    const OUTPUT: &str = "\
+STAT
+cpu  100 0 50 800 50 0 0 0 0 0
+MEM
+MemTotal:        8000000 kB
+MemAvailable:    2000000 kB
+SwapTotal:       2000000 kB
+SwapFree:        1500000 kB
+UP
+470000.42
+CPUS
+4
+LOAD
+0.52 0.71 0.93
+DISKS
+/dev/sda1 100000000 41000000 59000000 41% /
+/dev/sdb1 500000000 10000000 490000000 2% /mnt/data store
+NET
+    eth0: 1024000 100 0 0 0 0 0 0 2048000 200 0 0 0 0 0 0
+      lo: 500 5 0 0 0 0 0 0 500 5 0 0 0 0 0 0
+PROCS
+ 12.5  3.2  1234 postgres
+  4.0  1.1  2345 sshd
+";
+
+    #[test]
+    fn parses_detail_sections() {
+        let detail = parse_detail(OUTPUT).expect("ayristirilabilmeli");
+
+        assert_eq!(detail.load, [0.52, 0.71, 0.93]);
+        assert!((detail.swap_percent() - 25.0).abs() < 0.01);
+
+        assert_eq!(detail.disks.len(), 2);
+        assert_eq!(detail.disks[0].mount, "/");
+        assert_eq!(detail.disks[1].used_percent, 2.0);
+
+        assert_eq!(detail.interfaces.len(), 1, "lo listelenmemeli");
+        assert_eq!(detail.interfaces[0].name, "eth0");
+        assert_eq!(detail.interfaces[0].rx_bytes, 1_024_000);
+        assert_eq!(detail.interfaces[0].tx_bytes, 2_048_000);
+
+        assert_eq!(detail.processes.len(), 2);
+        assert_eq!(detail.processes[0].name, "postgres");
+        assert_eq!(detail.processes[0].pid, 1234);
+    }
+
+    /// Bagli dizin bosluk icerebiliyor; sutun birlestirme bozulmamali.
+    #[test]
+    fn mount_point_with_space_is_kept_whole() {
+        let detail = parse_detail(OUTPUT).unwrap();
+        assert_eq!(detail.disks[1].mount, "/mnt/data store");
+    }
+
+    #[test]
+    fn formats_sizes() {
+        assert_eq!(human_kb(1_024), "1.0 MB");
+        assert_eq!(human_kb(6_082_740), "5.8 GB");
+        assert_eq!(human_kb(512), "512 kB");
+    }
+}

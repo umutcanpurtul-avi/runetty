@@ -10,9 +10,11 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use crate::data::sessions::{self, Sessions};
-use crate::data::settings::Settings;
+use crate::data::settings::{Settings, Theme};
 use crate::data::store::Store;
-use crate::ui::{empty_state, host_dialog, icon_rail, monitor, preferences, sidebar};
+use crate::ui::{
+    empty_state, host_dialog, icon_rail, monitor, preferences, sidebar, trust_dialog,
+};
 
 pub fn build(
     app: &adw::Application,
@@ -37,6 +39,14 @@ pub fn build(
     let content_stack = gtk::Stack::new();
     let settings = Rc::new(RefCell::new(Settings::load()));
     crate::apply_user_css(&settings.borrow().appearance.css());
+    apply_theme(settings.borrow().appearance.theme);
+
+    // Sistem temasi degisince ya da secim degisince palet takip etsin.
+    {
+        let manager = adw::StyleManager::default();
+        crate::apply_palette(manager.is_dark());
+        manager.connect_dark_notify(|manager| crate::apply_palette(manager.is_dark()));
+    }
 
     let tabs = Tabs::new(
         adw::TabView::new(),
@@ -62,15 +72,43 @@ pub fn build(
         })
     };
 
+    // Baglanmadan once host anahtarini dogrula. ssh'in terminaldeki sorusu
+    // askpass yuzunden kullaniciya ulasmiyor; soruyu biz soruyoruz.
+    let guarded: Rc<dyn Fn(&str, Rc<dyn Fn()>)> = {
+        let store = Rc::clone(&store);
+        let window = window.clone();
+        Rc::new(move |alias: &str, proceed: Rc<dyn Fn()>| {
+            let host = store.borrow().hosts().into_iter().find(|host| host.alias == alias);
+            let Some(host) = host else { return };
+
+            trust_dialog::ensure_trusted(
+                &window,
+                &host.hostname,
+                host.port.unwrap_or(22),
+                move || proceed(),
+            );
+        })
+    };
+
     // Her zaman yeni sekme: Ctrl+tik, orta tik ve menudeki "New Session".
     let connect_new: Rc<dyn Fn(&str)> = {
         let command_for = Rc::clone(&command_for);
         let tabs = Rc::clone(&tabs);
+        let guarded = Rc::clone(&guarded);
         Rc::new(move |alias: &str| {
-            if let Some(command) = command_for(alias) {
-                tabs.spawn(&command, Some(alias));
-                with_refresh(|refresh| refresh());
-            }
+            let command_for = Rc::clone(&command_for);
+            let tabs = Rc::clone(&tabs);
+            let alias = alias.to_string();
+
+            guarded(
+                &alias.clone(),
+                Rc::new(move || {
+                    if let Some(command) = command_for(&alias) {
+                        tabs.spawn(&command, Some(&alias));
+                        with_refresh(|refresh| refresh());
+                    }
+                }),
+            );
         })
     };
 
@@ -78,17 +116,33 @@ pub fn build(
     let connect: Rc<dyn Fn(&str)> = {
         let command_for = Rc::clone(&command_for);
         let tabs = Rc::clone(&tabs);
+        let guarded = Rc::clone(&guarded);
         let refresh: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
         let refresh_slot = Rc::clone(&refresh);
         REFRESH.with(|cell| *cell.borrow_mut() = Some(refresh_slot));
 
         Rc::new(move |alias: &str| {
-            let Some(command) = command_for(alias) else { return };
-
-            tabs.open_or_focus(&command, Some(alias));
-            if let Some(refresh) = refresh.borrow().as_ref() {
-                refresh();
+            // Acik oturum varsa anahtar zaten dogrulanmis; dogrudan odaklan.
+            if tabs.focus(alias) {
+                return;
             }
+
+            let command_for = Rc::clone(&command_for);
+            let tabs = Rc::clone(&tabs);
+            let refresh = Rc::clone(&refresh);
+            let alias = alias.to_string();
+
+            guarded(
+                &alias.clone(),
+                Rc::new(move || {
+                    let Some(command) = command_for(&alias) else { return };
+
+                    tabs.open_or_focus(&command, Some(&alias));
+                    if let Some(refresh) = refresh.borrow().as_ref() {
+                        refresh();
+                    }
+                }),
+            );
         })
     };
 
@@ -142,12 +196,12 @@ pub fn build(
             sidebar.set_mode(mode);
             current_mode.set(mode);
 
-            let monitoring = mode == icon_rail::Mode::Monitor;
-            monitor.set_active(monitoring);
+            if mode == icon_rail::Mode::Monitor {
+                tabs.open_monitor(&monitor);
+                return;
+            }
 
-            stack.set_visible_child_name(if monitoring {
-                "monitor"
-            } else if tabs.view.n_pages() == 0 {
+            stack.set_visible_child_name(if tabs.view.n_pages() == 0 {
                 "empty"
             } else {
                 "tabs"
@@ -194,7 +248,6 @@ pub fn build(
     content_stack.set_vexpand(true);
     content_stack.add_named(&empty_page(&empty.widget), Some("empty"));
     content_stack.add_named(&tabs_page(&tabs.view), Some("tabs"));
-    content_stack.add_named(&monitor.widget, Some("monitor"));
     content_stack.set_visible_child_name("empty");
 
     let content_view = adw::ToolbarView::new();
@@ -206,6 +259,23 @@ pub fn build(
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&split));
     window.set_content(Some(&toasts));
+
+    // Klasor satirindaki + : kayit diyalogu o klasorde acilsin.
+    {
+        let window = window.clone();
+        let store = Rc::clone(&store);
+        let refresh = Rc::clone(&refresh);
+        sidebar.set_new_in_folder(Rc::new(move |folder: &str| {
+            let refresh = Rc::clone(&refresh);
+            host_dialog::present_in_folder(
+                &window,
+                Rc::clone(&store),
+                None,
+                Some(folder.to_string()),
+                move || refresh(),
+            );
+        }));
+    }
 
     install_actions(Wiring {
         window: &window,
@@ -220,25 +290,34 @@ pub fn build(
         refresh: &refresh,
     });
 
-    // Son sekme kapaninca bos duruma geri don — ama Monitor acikken degil.
+    // Son sekme kapaninca bos duruma geri don.
     {
         let stack = content_stack.clone();
-        let current_mode = Rc::clone(&current_mode);
         tabs.view.connect_n_pages_notify(move |view| {
-            if current_mode.get() == icon_rail::Mode::Monitor {
-                return;
-            }
             stack.set_visible_child_name(if view.n_pages() == 0 { "empty" } else { "tabs" });
         });
     }
 
+    // Monitor turu yalnizca kendi sekmesi secilikken calisir: arka plandaki
+    // bir sekmenin ag ve CPU yakmasi icin sebep yok.
+    {
+        let monitor = Rc::clone(&monitor);
+        let tabs_for_notify = Rc::clone(&tabs);
+        tabs.view.connect_selected_page_notify(move |view| {
+            let showing = view
+                .selected_page()
+                .zip(tabs_for_notify.monitor_page.borrow().clone())
+                .is_some_and(|(selected, monitor_page)| selected == monitor_page);
+
+            monitor.set_active(showing);
+        });
+    }
+
     if mode == icon_rail::Mode::Monitor {
+        tabs.open_monitor(&monitor);
         if demo_metrics {
             monitor.demo();
-        } else {
-            monitor.set_active(true);
         }
-        content_stack.set_visible_child_name("monitor");
     }
 
     if let Some(command) = exec {
@@ -247,13 +326,19 @@ pub fn build(
 
     // Virgulle ayrilmis liste; `+` oneki ek oturum acar. Odaklanma ve
     // coklu oturum davranisini tek komutla dogrulamak icin.
-    if let Some(aliases) = autoconnect {
-        for alias in aliases.split(',').map(str::trim).filter(|a| !a.is_empty()) {
-            match alias.strip_prefix('+') {
-                Some(alias) => connect_new(alias),
-                None => connect(alias),
+    if let Some(aliases) = autoconnect.map(str::to_string) {
+        // Pencere sunulduktan sonra: diyaloglarin bir ust pencereye
+        // ihtiyaci var, yoksa sessizce gorunmuyorlar.
+        let connect = Rc::clone(&connect);
+        let connect_new = Rc::clone(&connect_new);
+        glib::idle_add_local_once(move || {
+            for alias in aliases.split(',').map(str::trim).filter(|a| !a.is_empty()) {
+                match alias.strip_prefix('+') {
+                    Some(alias) => connect_new(alias),
+                    None => connect(alias),
+                }
             }
-        }
+        });
     }
 
     // Parametresiz bir pencere eylemini tetikler; dogrulama icin.
@@ -303,6 +388,17 @@ fn with_refresh<F: FnOnce(&Rc<dyn Fn()>)>(action: F) {
     }
 }
 
+/// Secimi libadwaita'ya bildirir; palet degisimi `dark` sinyaliyle geliyor.
+pub fn apply_theme(theme: Theme) {
+    let scheme = match theme {
+        Theme::System => adw::ColorScheme::Default,
+        Theme::Light => adw::ColorScheme::ForceLight,
+        Theme::Dark => adw::ColorScheme::ForceDark,
+    };
+
+    adw::StyleManager::default().set_color_scheme(scheme);
+}
+
 fn empty_page(child: &gtk::Box) -> gtk::Widget {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
     page.add_css_class("content-bg");
@@ -332,6 +428,9 @@ struct Tabs {
     /// Alias -> acik sekmeleri. Ayni sunucuya birden fazla oturum
     /// acilabiliyor; odaklanma en son acilana gider.
     open: RefCell<HashMap<String, Vec<adw::TabPage>>>,
+    /// Monitor da bir sekme; terminal oturumlarinin yanina geliyor,
+    /// yerlerini almiyor.
+    monitor_page: RefCell<Option<adw::TabPage>>,
     live: Rc<Sessions>,
     settings: Rc<RefCell<Settings>>,
 }
@@ -347,6 +446,7 @@ impl Tabs {
             view,
             stack,
             open: RefCell::new(HashMap::new()),
+            monitor_page: RefCell::new(None),
             live,
             settings,
         })
@@ -389,13 +489,53 @@ impl Tabs {
         with_refresh(|refresh| refresh());
     }
 
+    /// Monitor sekmesini acar ya da acik olana gecer.
+    fn open_monitor(self: &Rc<Self>, monitor: &Rc<monitor::Monitor>) {
+        if let Some(page) = self.monitor_page.borrow().clone() {
+            self.view.set_selected_page(&page);
+            self.stack.set_visible_child_name("tabs");
+            return;
+        }
+
+        let page = self.view.append(&monitor.widget);
+        page.set_title("Monitor");
+        self.view.set_selected_page(&page);
+        self.stack.set_visible_child_name("tabs");
+        *self.monitor_page.borrow_mut() = Some(page.clone());
+
+        let this = Rc::clone(self);
+        let monitor = Rc::clone(monitor);
+        let closed = page;
+        let handler: Rc<RefCell<Option<glib::SignalHandlerId>>> =
+            Rc::new(RefCell::new(None));
+        let slot = Rc::clone(&handler);
+
+        *handler.borrow_mut() = Some(self.view.connect_page_detached(move |view, page, _| {
+            if page != &closed {
+                return;
+            }
+            monitor.set_active(false);
+            *this.monitor_page.borrow_mut() = None;
+            if let Some(id) = slot.borrow_mut().take() {
+                view.disconnect(id);
+            }
+        }));
+    }
+
+    /// Acik oturum varsa ona gecer ve `true` doner.
+    fn focus(&self, alias: &str) -> bool {
+        let existing = self.open.borrow().get(alias).and_then(|p| p.last().cloned());
+        let Some(page) = existing else { return false };
+
+        self.view.set_selected_page(&page);
+        self.stack.set_visible_child_name("tabs");
+        true
+    }
+
     /// Acik oturum varsa ona gecer; yoksa yenisini acar.
     fn open_or_focus(self: &Rc<Self>, command: &str, alias: Option<&str>) {
         if let Some(alias) = alias {
-            let existing = self.open.borrow().get(alias).and_then(|p| p.last().cloned());
-            if let Some(page) = existing {
-                self.view.set_selected_page(&page);
-                self.stack.set_visible_child_name("tabs");
+            if self.focus(alias) {
                 return;
             }
         }

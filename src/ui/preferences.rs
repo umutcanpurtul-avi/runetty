@@ -7,7 +7,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::pango;
 
-use crate::data::settings::Settings;
+use crate::data::settings::{Settings, Theme};
 
 pub fn present<F>(parent: &impl IsA<gtk::Widget>, settings: Rc<RefCell<Settings>>, apply: F)
 where
@@ -20,13 +20,52 @@ where
     page.set_title("Appearance");
     page.set_icon_name(Some("preferences-desktop-font-symbolic"));
 
+    let apply_early = Rc::new(apply);
+    let apply = Rc::clone(&apply_early);
+
+    let appearance = adw::PreferencesGroup::new();
+    appearance.set_title("Tema");
+
+    let theme_row = adw::ComboRow::new();
+    theme_row.set_title("Renk semasi");
+    theme_row.set_subtitle("Sistem secenegi masaustunun ayarini takip eder");
+
+    let names: Vec<&str> = Theme::all().iter().map(|theme| theme.label()).collect();
+    let model = gtk::StringList::new(&names);
+    theme_row.set_model(Some(&model));
+    theme_row.set_selected(
+        Theme::all()
+            .iter()
+            .position(|theme| *theme == settings.borrow().appearance.theme)
+            .unwrap_or(0) as u32,
+    );
+
+    {
+        let settings = Rc::clone(&settings);
+        theme_row.connect_selected_notify(move |row| {
+            let Some(theme) = Theme::all().get(row.selected() as usize).copied() else {
+                return;
+            };
+
+            let mut settings = settings.borrow_mut();
+            if settings.appearance.theme == theme {
+                return;
+            }
+            settings.appearance.theme = theme;
+            settings.save();
+            drop(settings);
+
+            crate::window::apply_theme(theme);
+        });
+    }
+
+    appearance.add(&theme_row);
+
     let fonts = adw::PreferencesGroup::new();
     fonts.set_title("Fonts");
     fonts.set_description(Some(
         "Degisiklik aninda uygulanir ve acik terminallere de yansir.",
     ));
-
-    let apply = Rc::new(apply);
 
     let interface = font_row(
         "Interface",
@@ -91,6 +130,7 @@ where
     }
     reset.add(&button);
 
+    page.add(&appearance);
     page.add(&fonts);
     page.add(&reset);
     dialog.add(&page);

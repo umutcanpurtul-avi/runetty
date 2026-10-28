@@ -6,10 +6,35 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    /// Masaustunun karar vermesine birak.
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    pub fn all() -> [Theme; 3] {
+        [Theme::System, Theme::Light, Theme::Dark]
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Theme::System => "Sistem",
+            Theme::Light => "Acik",
+            Theme::Dark => "Koyu",
+        }
+    }
+}
+
 /// Bos birakilan alan "temanin kendi secimi" demek.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Appearance {
+    pub theme: Theme,
     pub interface_font: String,
     pub interface_size: f64,
     pub terminal_font: String,
@@ -19,6 +44,7 @@ pub struct Appearance {
 impl Default for Appearance {
     fn default() -> Self {
         Self {
+            theme: Theme::default(),
             interface_font: "Inter".into(),
             interface_size: 13.0,
             terminal_font: "JetBrains Mono".into(),

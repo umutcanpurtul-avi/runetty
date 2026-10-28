@@ -219,6 +219,7 @@ fn build_card(host: &Host) -> Card {
 
     let gauges = gtk::Box::new(gtk::Orientation::Horizontal, 14);
     gauges.set_valign(gtk::Align::Center);
+    gauges.set_halign(gtk::Align::End);
 
     let rings = [Ring::new(), Ring::new(), Ring::new()];
     for (ring, label) in rings.iter().zip(["CPU", "MEM", "DISK"]) {
@@ -228,16 +229,22 @@ fn build_card(host: &Host) -> Card {
     // Hata, kartin icinde ve cozum eyleminin yaninda duruyor.
     let error = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     error.set_valign(gtk::Align::Center);
+    error.set_halign(gtk::Align::End);
     error.set_visible(false);
 
+    // Sabit genislik: mesaj uzunlugu degisince Retry'in yeri kaymasin,
+    // kartlar alt alta hizali dursun.
     let error_text = gtk::Label::new(None);
     error_text.add_css_class("monitor-error");
     error_text.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    error_text.set_max_width_chars(42);
+    error_text.set_width_chars(44);
+    error_text.set_max_width_chars(44);
+    error_text.set_xalign(1.0);
 
     let retry = gtk::Button::with_label("Retry");
     retry.add_css_class("flat");
     retry.add_css_class("retry");
+    retry.set_valign(gtk::Align::Center);
 
     error.append(&error_text);
     error.append(&retry);

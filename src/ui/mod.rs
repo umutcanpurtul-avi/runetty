@@ -7,6 +7,7 @@ pub mod model;
 pub mod monitor;
 pub mod rows;
 pub mod sidebar;
+pub mod trust_dialog;
 
 #[cfg(feature = "terminal")]
 pub mod terminal;

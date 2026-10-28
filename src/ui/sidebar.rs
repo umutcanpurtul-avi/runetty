@@ -26,12 +26,19 @@ pub struct Sidebar {
     menu: gtk::PopoverMenu,
     store: Rc<RefCell<Store>>,
     live: Rc<Sessions>,
+    /// Klasor satirindaki + dugmesi buradan yeni kayit diyalogunu aciyor.
+    new_in_folder: RefCell<Option<Rc<dyn Fn(&str)>>>,
     connect: Rc<dyn Fn(&str)>,
     connect_new: Rc<dyn Fn(&str)>,
     filter: RefCell<String>,
 }
 
 impl Sidebar {
+    /// Pencere kurulduktan sonra baglanir: diyalog bir ust pencere istiyor.
+    pub fn set_new_in_folder(&self, callback: Rc<dyn Fn(&str)>) {
+        *self.new_in_folder.borrow_mut() = Some(callback);
+    }
+
     pub fn set_mode(&self, mode: Mode) {
         // Monitor'un kartlari icerik alaninda; kenar cubugu ayni sunucu
         // listesini gosteriyor, cunku mod dugmeleri de orada duruyor.
@@ -105,10 +112,8 @@ impl Sidebar {
                 .collect();
 
             let expander = gtk::Expander::new(None);
-            let label = gtk::Label::new(Some(&folder));
-            label.add_css_class("folder-label");
-            expander.set_label_widget(Some(&label));
-            attach_folder_menu(&label, &folder, self);
+            let header = folder_header(&folder, self);
+            expander.set_label_widget(Some(&header));
             attach_drop_target(&expander, Some(&folder), self);
             expander.set_expanded(true);
             expander.set_margin_start(6);
@@ -289,7 +294,87 @@ fn attach_drop_target(
     widget.as_ref().add_controller(target);
 }
 
-/// Klasor basligina sag tik: silme. Klasor yalnizca bir etiket oldugu icin
+/// Klasor satiri: ad, yaninda yeniden adlandirma ve "bu klasore yeni sunucu".
+fn folder_header(folder: &str, sidebar: &Rc<Sidebar>) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    row.add_css_class("folder-header");
+
+    let label = gtk::Label::new(Some(folder));
+    label.add_css_class("folder-label");
+    label.set_hexpand(true);
+    label.set_xalign(0.0);
+    row.append(&label);
+
+    let rename = folder_button("document-edit-symbolic", "Klasoru yeniden adlandir");
+    {
+        let sidebar = Rc::clone(sidebar);
+        let folder = folder.to_string();
+        rename.connect_clicked(move |_| rename_folder(&sidebar, &folder));
+    }
+    row.append(&rename);
+
+    let add = folder_button("list-add-symbolic", "Bu klasore yeni sunucu");
+    {
+        let sidebar = Rc::clone(sidebar);
+        let folder = folder.to_string();
+        add.connect_clicked(move |_| {
+            let callback = sidebar.new_in_folder.borrow().clone();
+            if let Some(callback) = callback {
+                callback(&folder);
+            }
+        });
+    }
+    row.append(&add);
+
+    attach_folder_menu(&label, folder, sidebar);
+    row
+}
+
+fn folder_button(icon: &str, tooltip: &str) -> gtk::Button {
+    let button = gtk::Button::from_icon_name(icon);
+    button.add_css_class("folder-action");
+    button.set_tooltip_text(Some(tooltip));
+    button.set_valign(gtk::Align::Center);
+    button
+}
+
+fn rename_folder(sidebar: &Rc<Sidebar>, folder: &str) {
+    let entry = adw::EntryRow::new();
+    entry.set_title("Klasor adi");
+    entry.set_text(folder);
+
+    let group = adw::PreferencesGroup::new();
+    group.add(&entry);
+
+    let dialog = adw::AlertDialog::new(Some("Klasoru yeniden adlandir"), None);
+    dialog.set_extra_child(Some(&group));
+    dialog.add_response("cancel", "Vazgec");
+    dialog.add_response("rename", "Kaydet");
+    dialog.set_response_appearance("rename", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("rename"));
+    dialog.set_close_response("cancel");
+
+    let owner = Rc::clone(sidebar);
+    let old = folder.to_string();
+    dialog.connect_response(None, move |dialog, response| {
+        if response != "rename" {
+            return;
+        }
+
+        let new = entry.text().trim().to_string();
+        if new.is_empty() {
+            dialog.set_body("Klasor adi bos birakilamaz.");
+            return;
+        }
+
+        owner.store.borrow_mut().rename_folder(&old, &new);
+        owner.refresh();
+    });
+
+    dialog.present(Some(&sidebar.widget));
+}
+
+/// Klasor adina sag tik: silme. Klasor yalnizca bir etiket oldugu icin
 /// silmek sunuculari silmez, sadece gruptan cikarir.
 fn attach_folder_menu(label: &gtk::Label, folder: &str, sidebar: &Rc<Sidebar>) {
     let gesture = gtk::GestureClick::new();
@@ -396,6 +481,7 @@ pub fn build(
         sessions,
         store,
         live,
+        new_in_folder: RefCell::new(None),
         connect,
         connect_new,
         filter: RefCell::new(String::new()),

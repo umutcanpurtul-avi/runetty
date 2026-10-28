@@ -21,6 +21,20 @@ pub fn present<F>(
 ) where
     F: Fn() + 'static,
 {
+    present_in_folder(parent, store, alias, None, on_saved)
+}
+
+/// `prefill_folder`: klasorun yanindaki + dugmesinden gelen yeni kayit,
+/// dogrudan o klasorde baslasin.
+pub fn present_in_folder<F>(
+    parent: &impl IsA<gtk::Widget>,
+    store: Rc<RefCell<Store>>,
+    alias: Option<String>,
+    prefill_folder: Option<String>,
+    on_saved: F,
+) where
+    F: Fn() + 'static,
+{
     let existing = alias.as_ref().and_then(|alias| {
         store.borrow().hosts().into_iter().find(|host| &host.alias == alias)
     });
@@ -144,6 +158,10 @@ pub fn present<F>(
     forget.set_valign(gtk::Align::Center);
     forget.set_visible(false);
     password.add_suffix(&forget);
+
+    if let Some(folder_name) = &prefill_folder {
+        folder.set_text(folder_name);
+    }
 
     if let Some(host) = &existing {
         name.set_text(&host.alias);

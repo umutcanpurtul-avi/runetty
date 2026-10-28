@@ -156,9 +156,35 @@ fn argument_value(flag: &str) -> Option<String> {
 }
 
 thread_local! {
-    /// Ayarlardan gelen font katmani. style.css'in ustunde duruyor,
+    /// Acik palet. style.css koyu paleti tutuyor; bu saglayici yalnizca
+    /// acik temada ekleniyor ve renkleri yeniden tanimliyor.
+    static LIGHT_CSS: gtk::CssProvider = gtk::CssProvider::new();
+
+    /// Ayarlardan gelen font katmani. Paletin de ustunde duruyor,
     /// boylece tasarim tokenlari dosyada kalirken tercih ezebiliyor.
     static USER_CSS: gtk::CssProvider = gtk::CssProvider::new();
+}
+
+/// Acik paleti ekler ya da kaldirir. libadwaita'nin `dark` durumunu
+/// izleyen taraf cagirir; burada yalnizca saglayici yonetiliyor.
+pub fn apply_palette(dark: bool) {
+    let Some(display) = gtk::gdk::Display::default() else {
+        return;
+    };
+
+    LIGHT_CSS.with(|provider| {
+        if dark {
+            gtk::style_context_remove_provider_for_display(&display, provider);
+            return;
+        }
+
+        provider.load_from_resource(&format!("{RESOURCE_PATH}/light.css"));
+        gtk::style_context_add_provider_for_display(
+            &display,
+            provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+        );
+    });
 }
 
 pub fn apply_user_css(css: &str) {
@@ -166,10 +192,11 @@ pub fn apply_user_css(css: &str) {
         provider.load_from_string(css);
 
         if let Some(display) = gtk::gdk::Display::default() {
+            // Paletin de ustunde: font tercihi her iki temada da gecerli.
             gtk::style_context_add_provider_for_display(
                 &display,
                 provider,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
             );
         }
     });
