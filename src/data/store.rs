@@ -202,5 +202,14 @@ pub struct LocalInput {
 }
 
 fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|dir| dir.join("runetty/hosts.toml"))
+    // Flatpak icinde XDG_CONFIG_HOME sandbox'in kendi dizinini gosterir.
+    // Kayitlari yerel kurulumla paylasmak icin host'un ~/.config'ini
+    // acikca kullaniyoruz; manifest bu yola izin veriyor.
+    let base = if std::path::Path::new("/.flatpak-info").exists() {
+        dirs::home_dir()?.join(".config")
+    } else {
+        dirs::config_dir()?
+    };
+
+    Some(base.join("runetty/hosts.toml"))
 }

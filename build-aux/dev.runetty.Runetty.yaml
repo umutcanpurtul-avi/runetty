@@ -32,6 +32,8 @@ finish-args:
   - --share=network
   - --socket=ssh-auth
   - --filesystem=~/.ssh
+  # Kayitlar yerel kurulumla ayni dosyada dursun.
+  - --filesystem=xdg-config/runetty:create
   - --filesystem=home
   - --talk-name=org.freedesktop.Notifications
   # Parolalar sistem keyring'inde; Secret Service erisimi gerekli.
