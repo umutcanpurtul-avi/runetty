@@ -51,7 +51,8 @@ impl Sidebar {
 
     /// Sag tik menusunu elle acar. `--context-menu <alias>` ile dogrulama icin.
     pub fn popup_menu_for(&self, alias: &str) {
-        self.menu.set_menu_model(Some(&context_menu(alias)));
+        let monitored = self.store.borrow().is_monitored(alias);
+        self.menu.set_menu_model(Some(&context_menu(alias, monitored)));
         self.menu.set_pointing_to(Some(&gtk::gdk::Rectangle::new(40, 70, 1, 1)));
         self.menu.popup();
     }
@@ -193,7 +194,8 @@ impl Sidebar {
             let Some(row) = list.row_at_y(y as i32) else { return };
             let Some(host) = hosts.get(row.index() as usize) else { return };
 
-            this.menu.set_menu_model(Some(&context_menu(&host.alias)));
+            let monitored = this.store.borrow().is_monitored(&host.alias);
+            this.menu.set_menu_model(Some(&context_menu(&host.alias, monitored)));
 
             // Tiklama noktasini menunun bagli oldugu kutunun uzayina tasi.
             let point = list
@@ -216,11 +218,18 @@ impl Sidebar {
 
 /// Eylemler alias'i hedef olarak tasiyor, boylece pencere seviyesindeki
 /// tek eylem her satir icin calisiyor.
-fn context_menu(alias: &str) -> gio::Menu {
+fn context_menu(alias: &str, monitored: bool) -> gio::Menu {
+    let monitor_label = if monitored {
+        "Monitor'den cikar"
+    } else {
+        "Monitor'e ekle"
+    };
+
     let menu = gio::Menu::new();
     for (label, action) in [
         ("Connect", "win.host-connect"),
         ("New Session", "win.host-connect-new"),
+        (monitor_label, "win.toggle-monitor"),
         ("Edit", "win.host-edit"),
         ("Delete", "win.host-delete"),
     ] {

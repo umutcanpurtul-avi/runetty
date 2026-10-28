@@ -21,6 +21,10 @@ struct File {
     /// ssh config'ten gelen kayitlara runetty'nin ekledigi klasor.
     #[serde(default)]
     folders: HashMap<String, String>,
+    /// Monitor'de izlenen kayitlar. Hem ssh config hem yerel kayitlar
+    /// burada toplaniyor; izleme bir gorunum tercihi, baglanti ayari degil.
+    #[serde(default)]
+    monitored: Vec<String>,
     /// Henuz bos olan klasorler. Icine sunucu girince de burada kalirlar,
     /// boylece son sunucu tasinsa bile klasor kaybolmuyor.
     #[serde(default)]
@@ -79,6 +83,7 @@ impl Store {
             let mut host = host.clone();
             host.folder = self.file.folders.get(&host.alias).cloned();
             host.last_used = self.file.last_used.get(&host.alias).copied();
+            host.monitored = self.file.monitored.contains(&host.alias);
             hosts.push(host);
         }
 
@@ -93,6 +98,7 @@ impl Store {
                 folder: local.folder.clone(),
                 identity_file: local.identity_file.clone(),
                 last_used: self.file.last_used.get(&local.alias).copied(),
+                monitored: self.file.monitored.contains(&local.alias),
                 source: Source::Local,
             });
         }
@@ -229,6 +235,7 @@ impl Store {
 
         self.file.last_used.remove(alias);
         self.file.folders.remove(alias);
+        self.file.monitored.retain(|name| name != alias);
         // Kayit gidiyorsa keyring'de parolasi kalmasin. Kalici depolama
         // yoksa (testler) keyring'e de dokunmuyoruz.
         if self.path.is_some() {
@@ -238,6 +245,30 @@ impl Store {
         deleted
     }
 
+
+    /// Monitor'de izlenen kayitlar.
+    pub fn monitored(&self) -> Vec<Host> {
+        self.hosts().into_iter().filter(|host| host.monitored).collect()
+    }
+
+    pub fn is_monitored(&self, alias: &str) -> bool {
+        self.file.monitored.iter().any(|name| name == alias)
+    }
+
+    pub fn set_monitored(&mut self, alias: &str, monitored: bool) {
+        let already = self.is_monitored(alias);
+        if already == monitored {
+            return;
+        }
+
+        if monitored {
+            self.file.monitored.push(alias.to_string());
+        } else {
+            self.file.monitored.retain(|name| name != alias);
+        }
+
+        self.save();
+    }
 
     pub fn hidden_count(&self) -> usize {
         self.file.hidden.len()
@@ -340,8 +371,34 @@ mod tests {
             folder: None,
             identity_file: None,
             last_used: None,
+            monitored: false,
             source: Source::SshConfig,
         }
+    }
+
+    /// Izleme varsayilan kapali olmali: aksi halde her kayit icin iki
+    /// saniyede bir ssh calisir.
+    #[test]
+    fn monitoring_is_opt_in() {
+        let mut store = store(vec![local("box")], Vec::new());
+        assert!(store.monitored().is_empty());
+
+        store.set_monitored("box", true);
+        assert_eq!(store.monitored().len(), 1);
+
+        store.set_monitored("box", false);
+        assert!(store.monitored().is_empty());
+    }
+
+    #[test]
+    fn deleting_a_host_stops_monitoring_it() {
+        let mut store = store(vec![local("box")], Vec::new());
+        store.set_monitored("box", true);
+
+        store.remove("box");
+
+        assert!(store.monitored().is_empty());
+        assert!(!store.is_monitored("box"));
     }
 
     #[test]

@@ -10,6 +10,8 @@
     <file alias="rail-sessions-symbolic.svg" preprocess="xml-stripblanks">icons/rail-sessions-symbolic.svg</file>
     <file alias="rail-agents-symbolic.svg" preprocess="xml-stripblanks">icons/rail-agents-symbolic.svg</file>
     <file alias="rail-monitor-symbolic.svg" preprocess="xml-stripblanks">icons/rail-monitor-symbolic.svg</file>
+    <file alias="pin-right-symbolic.svg" preprocess="xml-stripblanks">icons/pin-right-symbolic.svg</file>
+    <file alias="unpin-symbolic.svg" preprocess="xml-stripblanks">icons/unpin-symbolic.svg</file>
   </gresource>
   <gresource prefix="/dev/runetty/Runetty/icons/scalable/apps">
     <file alias="dev.runetty.Runetty.svg" preprocess="xml-stripblanks">../icons/dev.runetty.Runetty.svg</file>

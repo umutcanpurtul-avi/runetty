@@ -457,3 +457,30 @@ button.folder-action:hover {
   background-color: @bg_hover;
   color: @fg_primary;
 }
+
+.gauge-value {
+  font-size: 11px;
+  font-weight: 600;
+  color: @fg_secondary;
+}
+
+.monitor-card-header { padding: 2px 0; }
+
+.monitor-card.expanded {
+  border-color: alpha(@accent, 0.35);
+}
+
+.monitor-detail {
+  padding: 14px 2px 4px 2px;
+  margin-top: 10px;
+  border-top: 1px solid @hairline;
+}
+
+.monitor-bar {
+  padding: 8px 16px 2px 16px;
+}
+
+/* Sabit panelde kartlar dar sutuna giriyor; kenar bosluklari kisiliyor. */
+.content-bg.pinned {
+  border-left: 1px solid @hairline;
+}

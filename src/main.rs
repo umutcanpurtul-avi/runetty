@@ -54,6 +54,7 @@ fn main() -> glib::ExitCode {
     let edit = argument_value("--edit");
     let action = argument_value("--action");
     let demo_metrics = std::env::args().any(|arg| arg == "--demo-metrics");
+    let expand = argument_value("--expand");
 
     // Gelistirme bayraklari acik bir pencere varken de ise yaramali;
     // tek-instance davranisi bunlari calisan surece devredip yutuyor.
@@ -64,6 +65,7 @@ fn main() -> glib::ExitCode {
         || edit.is_some()
         || action.is_some()
         || demo_metrics
+        || expand.is_some()
     {
         gio::ApplicationFlags::NON_UNIQUE
     } else {
@@ -96,6 +98,7 @@ fn main() -> glib::ExitCode {
                 edit.as_deref(),
                 action.as_deref(),
                 demo_metrics,
+                expand.as_deref(),
             );
         window.present();
         if let Some(path) = screenshot.clone() {

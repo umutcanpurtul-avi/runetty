@@ -25,6 +25,7 @@ pub fn build(
     edit: Option<&str>,
     action: Option<&str>,
     demo_metrics: bool,
+    expand: Option<&str>,
 ) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
         .application(app)
@@ -197,6 +198,11 @@ pub fn build(
             current_mode.set(mode);
 
             if mode == icon_rail::Mode::Monitor {
+                // Sabitlenmisse zaten ekranda; sekme acmaya gerek yok.
+                if monitor.is_pinned() {
+                    monitor.set_active(true);
+                    return;
+                }
                 tabs.open_monitor(&monitor);
                 return;
             }
@@ -253,9 +259,19 @@ pub fn build(
     content_stack.add_named(&tabs_page(&tabs.view), Some("tabs"));
     content_stack.set_visible_child_name("empty");
 
+    // Sabitlenmis Monitor sagda kendi sutununda durur; sekmeler solda kalir.
+    // Paned, genisligi kullaniciya birakiyor: "ne cok buyuk ne cok kucuk"
+    // karari bir kez verilip dondurulmak yerine surukleyerek ayarlanabiliyor.
+    let panes = gtk::Paned::new(gtk::Orientation::Horizontal);
+    panes.set_start_child(Some(&content_stack));
+    panes.set_resize_start_child(true);
+    panes.set_shrink_start_child(false);
+    panes.set_shrink_end_child(false);
+    panes.set_wide_handle(true);
+
     let content_view = adw::ToolbarView::new();
     content_view.add_top_bar(&header);
-    content_view.set_content(Some(&content_stack));
+    content_view.set_content(Some(&panes));
     split.set_content(Some(&content_view));
 
     // Toast'lar icin tek bir katman; geri bildirim buradan geciyor.
@@ -286,6 +302,8 @@ pub fn build(
         search: &search,
         store: &store,
         settings: &settings,
+        monitor: &monitor,
+        panes: &panes,
         tabs: &tabs,
         command_for: &command_for,
         connect: &connect,
@@ -320,6 +338,11 @@ pub fn build(
         tabs.open_monitor(&monitor);
         if demo_metrics {
             monitor.demo();
+        }
+
+        if let Some(alias) = expand.map(str::to_string) {
+            let monitor = Rc::clone(&monitor);
+            glib::idle_add_local_once(move || monitor.expand(&alias));
         }
     }
 
@@ -492,6 +515,15 @@ impl Tabs {
         with_refresh(|refresh| refresh());
     }
 
+    /// Sabitlenirken sekmeyi kapatir; widget serbest kalsin ki panele
+    /// yeniden eklenebilsin.
+    fn close_monitor(&self) {
+        let page = self.monitor_page.borrow_mut().take();
+        if let Some(page) = page {
+            self.view.close_page(&page);
+        }
+    }
+
     /// Monitor sekmesini acar ya da acik olana gecer.
     fn open_monitor(self: &Rc<Self>, monitor: &Rc<monitor::Monitor>) {
         if let Some(page) = self.monitor_page.borrow().clone() {
@@ -659,6 +691,8 @@ struct Wiring<'a> {
     search: &'a gtk::SearchEntry,
     store: &'a Rc<RefCell<Store>>,
     settings: &'a Rc<RefCell<Settings>>,
+    monitor: &'a Rc<monitor::Monitor>,
+    panes: &'a gtk::Paned,
     tabs: &'a Rc<Tabs>,
     command_for: &'a Rc<dyn Fn(&str) -> Option<String>>,
     connect: &'a Rc<dyn Fn(&str)>,
@@ -713,6 +747,32 @@ fn install_actions(w: Wiring) {
         });
     }
     add(&host_connect_new);
+
+    let toggle_monitor = gio::SimpleAction::new("toggle-monitor", string);
+    {
+        let store = Rc::clone(w.store);
+        let refresh = Rc::clone(w.refresh);
+        let monitor = Rc::clone(w.monitor);
+        let window = window.clone();
+        toggle_monitor.connect_activate(move |_, target| {
+            let Some(alias) = target.and_then(glib::Variant::str) else { return };
+
+            let monitored = !store.borrow().is_monitored(alias);
+            store.borrow_mut().set_monitored(alias, monitored);
+            refresh();
+            monitor.rebuild_now();
+
+            toast(
+                &window,
+                &if monitored {
+                    format!("\"{alias}\" Monitor'e eklendi")
+                } else {
+                    format!("\"{alias}\" Monitor'den cikarildi")
+                },
+            );
+        });
+    }
+    add(&toggle_monitor);
 
     let host_edit = gio::SimpleAction::new("host-edit", string);
     {
@@ -829,6 +889,35 @@ fn install_actions(w: Wiring) {
         about.connect_activate(move |_, _| show_about(&window));
     }
     add(&about);
+
+    let toggle_pin = gio::SimpleAction::new("toggle-monitor-pin", None);
+    {
+        let monitor = Rc::clone(w.monitor);
+        let tabs = Rc::clone(w.tabs);
+        let panes = w.panes.clone();
+        toggle_pin.connect_activate(move |_, _| {
+            if monitor.is_pinned() {
+                monitor.set_pinned(false);
+                panes.set_end_child(gtk::Widget::NONE);
+                tabs.open_monitor(&monitor);
+                return;
+            }
+
+            tabs.close_monitor();
+            monitor.set_pinned(true);
+            panes.set_end_child(Some(&monitor.widget));
+
+            // Varsayilan genislik: kartlar sigacak kadar genis, icerigi
+            // bogmayacak kadar dar. Kullanici buradan surukleyebiliyor.
+            if panes.position() == 0 {
+                let width = panes.width();
+                panes.set_position(if width > 900 { width - 420 } else { width / 2 });
+            }
+
+            monitor.set_active(true);
+        });
+    }
+    add(&toggle_pin);
 
     let palette = gio::SimpleAction::new("command-palette", None);
     palette.connect_activate(|_, _| glib::g_debug!("runetty", "TODO: command palette"));

@@ -55,6 +55,7 @@ fn parse(text: &str, origin: &Path, depth: u8) -> Vec<Host> {
                     folder: None,
                     identity_file: None,
                     last_used: None,
+                    monitored: false,
                     source: Source::SshConfig,
                 });
             }

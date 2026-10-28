@@ -100,18 +100,12 @@ pub fn parse(output: &str) -> Option<Sample> {
             continue;
         }
 
-        match line {
-            "STAT" | "MEM" | "UP" | "CPUS" | "DISK" => {
-                section = match line {
-                    "STAT" => "stat",
-                    "MEM" => "mem",
-                    "UP" => "up",
-                    "CPUS" => "cpus",
-                    _ => "disk",
-                };
-                continue;
-            }
-            _ => {}
+        // Butun bolum adlari tek yerden taniniyor. Detay ciktisindaki
+        // ek bolumler (LOAD, NET, PROCS) burada taninmayinca onceki bolumun
+        // icinde sayiliyordu ve ornegin cekirdek sayisi sifirlaniyordu.
+        if let Some(name) = section_name(line) {
+            section = name;
+            continue;
         }
 
         match section {
@@ -131,7 +125,7 @@ pub fn parse(output: &str) -> Option<Sample> {
             }
             "up" => uptime = line.split('.').next()?.parse().ok()?,
             "cpus" => cores = line.parse().unwrap_or(0),
-            "disk" => {
+            "disk" | "disks" => {
                 let fields: Vec<&str> = line.split_whitespace().collect();
                 // df -P: Filesystem 1024-blocks Used Available Capacity Mounted
                 if fields.len() >= 5 {
@@ -260,12 +254,13 @@ printf 'MEM\\n'; grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/me
 printf 'UP\\n'; cut -d' ' -f1 /proc/uptime; \
 printf 'CPUS\\n'; nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo; \
 printf 'LOAD\\n'; cut -d' ' -f1-3 /proc/loadavg; \
-printf 'DISKS\\n'; df -P -x tmpfs -x devtmpfs -x squashfs 2>/dev/null | tail -n +2; \
+printf 'DISKS\\n'; df -P -x tmpfs -x devtmpfs -x squashfs -x efivarfs -x overlay 2>/dev/null | tail -n +2; \
 printf 'NET\\n'; tail -n +3 /proc/net/dev; \
 printf 'PROCS\\n'; ps -eo pcpu,pmem,pid,comm --sort=-pcpu 2>/dev/null | tail -n +2 | head -10";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Disk {
+    pub device: String,
     pub mount: String,
     pub total_kb: u64,
     pub used_kb: u64,
@@ -345,8 +340,12 @@ pub fn parse_detail(output: &str) -> Option<Detail> {
                 }
             }
             "disks" => {
+                // Bind mount'lar ayni dosya sistemini defalarca gosteriyor;
+                // ilk goruldugu baglanti noktasi yeterli.
                 if let Some(disk) = parse_disk(line) {
-                    disks.push(disk);
+                    if !disks.iter().any(|seen: &Disk| seen.device == disk.device) {
+                        disks.push(disk);
+                    }
                 }
             }
             "net" => {
@@ -381,6 +380,8 @@ fn section_name(line: &str) -> Option<&'static str> {
         "UP" => Some("up"),
         "CPUS" => Some("cpus"),
         "LOAD" => Some("load"),
+        // Kart olcumu tekil, detay olcumu cogul basligi kullaniyor.
+        "DISK" => Some("disk"),
         "DISKS" => Some("disks"),
         "NET" => Some("net"),
         "PROCS" => Some("procs"),
@@ -399,6 +400,7 @@ fn parse_disk(line: &str) -> Option<Disk> {
     }
 
     Some(Disk {
+        device: fields[0].to_string(),
         total_kb: fields[1].parse().ok()?,
         used_kb: fields[2].parse().ok()?,
         used_percent: fields[4].trim_end_matches('%').parse().ok()?,
@@ -496,6 +498,26 @@ PROCS
  12.5  3.2  1234 postgres
   4.0  1.1  2345 sshd
 ";
+
+    /// LOAD, NET, PROCS bolumleri eskiden taninmiyor ve bir onceki bolumun
+    /// icinde sayiliyordu; cekirdek sayisi boylece sifirlaniyordu.
+    #[test]
+    fn extra_sections_do_not_clobber_earlier_ones() {
+        let detail = parse_detail(OUTPUT).unwrap();
+        assert_eq!(detail.sample.cores, 4);
+    }
+
+    #[test]
+    fn same_filesystem_is_listed_once() {
+        let text = OUTPUT.replace(
+            "/dev/sdb1 500000000 10000000 490000000 2% /mnt/data store",
+            "/dev/sdb1 500000000 10000000 490000000 2% /mnt/data store\n\
+             /dev/sda1 100000000 41000000 59000000 41% /home",
+        );
+
+        let detail = parse_detail(&text).unwrap();
+        assert_eq!(detail.disks.len(), 2, "bind mount tekrar listelenmemeli");
+    }
 
     #[test]
     fn parses_detail_sections() {

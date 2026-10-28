@@ -35,6 +35,9 @@ pub struct Host {
     /// `-i` ile gecilen ozel anahtar. ssh config'te `IdentityFile`.
     pub identity_file: Option<String>,
     pub last_used: Option<u64>,
+    /// Monitor'de izlenip izlenmedigi. Varsayilan kapali: her kayit icin
+    /// iki saniyede bir ssh calistirmak kimsenin istemedigi bir maliyet.
+    pub monitored: bool,
     pub source: Source,
 }
 
