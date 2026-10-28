@@ -27,6 +27,7 @@ struct Card {
     detail_body: gtk::Box,
     expanded: Cell<bool>,
     detail_busy: Cell<bool>,
+    stacked: Rc<Cell<bool>>,
     alias: String,
     command: Vec<String>,
     rings: [Ring; 3],
@@ -42,7 +43,9 @@ struct Card {
 pub struct Monitor {
     pub widget: gtk::Widget,
     /// Pinned as a right-hand pane, or living in a tab?
-    pinned: Cell<bool>,
+    /// Shared with the cards: a pinned pane is narrow, so detail panels
+    /// stack instead of sitting in two columns.
+    pinned: Rc<Cell<bool>>,
     pin_button: gtk::Button,
     list: gtk::Box,
     empty: gtk::Label,
@@ -77,7 +80,8 @@ impl Monitor {
         self.pinned.get()
     }
 
-    pub fn set_pinned(&self, pinned: bool) {
+    pub fn set_pinned(self: &Rc<Self>, pinned: bool) {
+        let changed = self.pinned.get() != pinned;
         self.pinned.set(pinned);
         self.pin_button.set_icon_name(if pinned {
             "unpin-symbolic"
@@ -94,6 +98,15 @@ impl Monitor {
             self.widget.add_css_class("pinned");
         } else {
             self.widget.remove_css_class("pinned");
+        }
+
+        // Open details were laid out for the old width; rebuild them.
+        if changed {
+            for card in self.cards.borrow().values() {
+                if card.expanded.get() {
+                    load_detail(card);
+                }
+            }
         }
     }
 
@@ -134,7 +147,7 @@ impl Monitor {
                 continue;
             }
 
-            let card = Rc::new(build_card(host));
+            let card = Rc::new(build_card(host, Rc::clone(&self.pinned)));
             attach_expander(&card);
             self.list.append(&card.widget);
             self.cards.borrow_mut().insert(host.alias.clone(), card);
@@ -278,7 +291,7 @@ async fn run(command: &[String], alias: &str) -> Result<String, String> {
     Err(if message.is_empty() { "connection failed".into() } else { message })
 }
 
-fn build_card(host: &Host) -> Card {
+fn build_card(host: &Host, stacked: Rc<Cell<bool>>) -> Card {
     let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
     widget.add_css_class("monitor-card");
 
@@ -361,6 +374,7 @@ fn build_card(host: &Host) -> Card {
         detail_body,
         expanded: Cell::new(false),
         detail_busy: Cell::new(false),
+        stacked,
         alias: host.alias.clone(),
         command: metrics::probe_args(host),
         rings,
@@ -437,7 +451,7 @@ fn load_detail(card: &Rc<Card>) {
         }
 
         match result.ok().and_then(|output| metrics::parse_detail(&output)) {
-            Some(detail) => body.append(&detail_columns(&detail)),
+            Some(detail) => body.append(&detail_columns(&detail, card.stacked.get())),
             None => {
                 let label = gtk::Label::new(Some("Could not fetch detail."));
                 label.set_xalign(0.0);
@@ -454,7 +468,12 @@ fn load_detail(card: &Rc<Card>) {
 ///   NETWORK |
 /// The left column holds short fixed rows, the right one the growing tables.
 /// In a narrow pane (pinned Monitor) the columns stack instead.
-fn detail_columns(detail: &metrics::Detail) -> gtk::Widget {
+/// Panels are spread across two columns:
+///   CPU     | MEMORY
+///   DISK    | TOP PROCESSES
+///   NETWORK |
+/// The left column holds short fixed rows, the right one the growing tables.
+fn detail_columns(detail: &metrics::Detail, stacked: bool) -> gtk::Widget {
     let (left_panels, right_panels) = detail_panels(detail);
 
     let left = gtk::Box::new(gtk::Orientation::Vertical, 14);
@@ -469,29 +488,23 @@ fn detail_columns(detail: &metrics::Detail) -> gtk::Widget {
         right.append(&panel);
     }
 
-    let columns = gtk::Box::new(gtk::Orientation::Horizontal, 28);
-    columns.set_homogeneous(true);
+    // A pinned pane is narrow, so the columns stack there. The split is driven
+    // by the pin state rather than a breakpoint: AdwBreakpointBin does not
+    // propagate its child's size request, which clipped the detail to the
+    // minimum height and let the next card overlap it.
+    let columns = gtk::Box::new(
+        if stacked {
+            gtk::Orientation::Vertical
+        } else {
+            gtk::Orientation::Horizontal
+        },
+        if stacked { 14 } else { 28 },
+    );
+    columns.set_homogeneous(!stacked);
     columns.append(&left);
     columns.append(&right);
 
-    // Two columns become unreadable in a narrow pane. BreakpointBin exists for
-    // exactly this: below 560 pixels the columns stack.
-    let bin = adw::BreakpointBin::new();
-    bin.set_child(Some(&columns));
-    bin.set_size_request(180, 40);
-
-    if let Ok(condition) = adw::BreakpointCondition::parse("max-width: 560px") {
-        let breakpoint = adw::Breakpoint::new(condition);
-        breakpoint.add_setter(
-            &columns,
-            "orientation",
-            Some(&gtk::Orientation::Vertical.to_value()),
-        );
-        breakpoint.add_setter(&columns, "homogeneous", Some(&false.to_value()));
-        bin.add_breakpoint(breakpoint);
-    }
-
-    bin.upcast()
+    columns.upcast()
 }
 
 fn detail_panels(detail: &metrics::Detail) -> (Vec<gtk::Widget>, Vec<gtk::Widget>) {
@@ -727,7 +740,7 @@ pub fn build(store: Rc<RefCell<Store>>) -> Rc<Monitor> {
 
     let monitor = Rc::new(Monitor {
         widget: page.upcast(),
-        pinned: Cell::new(false),
+        pinned: Rc::new(Cell::new(false)),
         pin_button: pin,
         list,
         empty,

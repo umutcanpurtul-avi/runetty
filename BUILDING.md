@@ -1,121 +1,154 @@
-# Derleme ve dagitim
+# Building and distribution
 
-## Karar
+## The decision
 
-**Flatpak birincil dagitim bicimi, yerel derleme ikincil.**
+**Flatpak is the primary distribution format; native builds come second.**
 
-Gerekce tek tabloda duruyor: GTK4 ve libadwaita surumleri dagitimlar arasinda
-dort yil aciyor. Ortak paydaya inmek (GTK 4.6 / libadwaita 1.1) `OverlaySplitView`,
-`ToolbarView`, `PreferencesDialog`, `SwitchRow` ve `SpinRow`'u masadan kaldirir —
-yani planin yarisini. Runtime'i sabitlemek bu problemi tumuyle ortadan kaldiriyor.
+The reason fits in one table: GTK4 and libadwaita versions span four years
+across distributions. Dropping to the common denominator (GTK 4.6 /
+libadwaita 1.1) would take `OverlaySplitView`, `ToolbarView`,
+`PreferencesDialog`, `SwitchRow` and `SpinRow` off the table — that is half
+the plan. Pinning the runtime removes the problem entirely.
 
-Yerel derleme icin taban **Ubuntu 24.04 LTS**: GTK 4.14 / libadwaita 1.5 / VTE 0.76.
-Bu ucluyu `Cargo.toml`'daki `v4_14` / `v1_5` / `v0_76` ozellik bayraklari ve
-`src/config.rs`'teki calisma ani kontrolu birlikte zorunlu kiliyor.
+The floor for native builds is **Ubuntu 24.04 LTS**: GTK 4.14 / libadwaita
+1.5 / VTE 0.76. That triple is enforced together by the `v4_14` / `v1_5` /
+`v0_76` feature flags in `Cargo.toml` and the runtime check in
+`src/config.rs`.
 
-## Dagitim matrisi
+## Distribution matrix
 
-| Dagitim | GTK4 | libadwaita | vte-gtk4 | Yerel derleme | Flatpak |
+| Distribution | GTK4 | libadwaita | vte-gtk4 | Native build | Flatpak |
 | --- | --- | --- | --- | --- | --- |
-| Arch / CachyOS / EndeavourOS | 4.24 | 1.10 | 0.84 | tam | tam |
-| Fedora 40+ | 4.14+ | 1.5+ | var | tam | tam |
-| Ubuntu 24.04 LTS (noble) | 4.14.5 | 1.5.0 | 0.76.0 | tam (taban) | tam |
-| Ubuntu 25.04+ | 4.18+ | 1.7+ | 0.78+ | tam | tam |
-| Debian 13 (trixie) | 4.18.6 | 1.7.6 | 0.80.1 | tam | tam |
-| Debian 12 (bookworm) | 4.8.3 | 1.2.2 | 0.70.6 | **hayir** | tam |
-| Ubuntu 22.04 LTS (jammy) | 4.6.9 | 1.1.7 | yok | **hayir** | tam |
-| Rocky / RHEL 10 | 4.16 | 1.6 | yok | yalniz kabuk `*` | tam |
-| Rocky / RHEL 9 | 4.6 | yok/eski | yok | **hayir** | tam |
-| openSUSE Tumbleweed | guncel | guncel | var | tam | tam |
+| Arch / CachyOS / EndeavourOS | 4.24 | 1.10 | 0.84 | full | full |
+| Fedora 40+ | 4.14+ | 1.5+ | yes | full | full |
+| Ubuntu 24.04 LTS (noble) | 4.14.5 | 1.5.0 | 0.76.0 | full (the floor) | full |
+| Ubuntu 25.04+ | 4.18+ | 1.7+ | 0.78+ | full | full |
+| Debian 13 (trixie) | 4.18.6 | 1.7.6 | 0.80.1 | full | full |
+| Debian 12 (bookworm) | 4.8.3 | 1.2.2 | 0.70.6 | **no** | full |
+| Ubuntu 22.04 LTS (jammy) | 4.6.9 | 1.1.7 | none | **no** | full |
+| Rocky / RHEL 10 | 4.16 | 1.6 | none | shell only `*` | full |
+| Rocky / RHEL 9 | 4.6 | none/old | none | **no** | full |
+| openSUSE Tumbleweed | current | current | yes | full | full |
 
-`*` Rocky 10'da GTK ve libadwaita yetiyor ama `vte291-gtk4` paketi yok;
-`--no-default-features` ile terminalsiz kabuk derlenir. Terminal icin Flatpak sart.
+`*` Rocky 10 has new enough GTK and libadwaita but no `vte291-gtk4` package,
+so `--no-default-features` builds the shell without a terminal. Use Flatpak
+for the terminal.
 
-Matristeki surumler dagitimlarin kendi paket arsivlerinden dogrulandi
-(Launchpad, packages.debian.org). Bunlarin altinda kalan her sey Flatpak.
+Versions in the matrix were verified against the distributions' own archives
+(Launchpad, packages.debian.org). Anything below them goes to Flatpak.
 
-## Flatpak (her dagitim)
+## Flatpak (every distribution)
 
 ```bash
 flatpak install -y flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
     org.freedesktop.Sdk.Extension.rust-stable//25.08
-pip install --user aiohttp toml tomlkit   # flatpak-cargo-generator icin
+pip install --user aiohttp toml tomlkit   # for flatpak-cargo-generator
 curl -LO https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
 python3 flatpak-cargo-generator.py Cargo.lock -o build-aux/cargo-sources.json
 flatpak-builder --user --install --force-clean build build-aux/dev.runetty.Runetty.yaml
 flatpak run dev.runetty.Runetty
 ```
 
-Runtime GNOME 50'ye sabitli: her dagitimda ayni GTK 4.20 / libadwaita 1.8.
-VTE manifest icinde 0.78.4 olarak derleniyor, dagitimin surumune bakilmiyor.
+The runtime is pinned to GNOME 50: the same GTK 4.20 / libadwaita 1.8 on
+every distribution. VTE is built from source at 0.78.4 inside the manifest,
+so the host's version is irrelevant.
 
-## Yerel derleme
+Build directory: keep it on the same filesystem as `.flatpak-builder`, or
+flatpak-builder fails with "Invalid cross-device link".
+
+## Native build
 
 ```bash
-./build-aux/install-deps.sh     # pacman / apt / dnf / zypper algilar
+./build-aux/install-deps.sh     # detects pacman / apt / dnf / zypper
 cargo build --release
-./target/release/runetty
+./build-aux/install.sh          # PREFIX=~/.local by default
 ```
 
-Betik kurulumun sonunda `pkg-config` surumlerini tabanla karsilastirir ve
-yetmiyorsa Flatpak'a yonlendirir.
+The script finishes by comparing `pkg-config` versions against the floor and
+points you at Flatpak when they fall short.
 
-### vte-gtk4 olmayan sistemler
+### Systems without vte-gtk4
 
 ```bash
 cargo build --release --no-default-features
 ```
 
-Terminal sekmeleri yerine bir aciklama etiketi gelir; arayuzun geri kalani calisir.
-Rocky 10 ve benzeri sistemlerde gorsel uzerinde calismak icin yeterli.
+Terminal tabs are replaced by an explanatory label; everything else works.
+Enough to work on the interface on Rocky 10 and similar.
 
-### Elle paket listeleri
+### Package lists
 
-| Aile | Paketler |
+| Family | Packages |
 | --- | --- |
 | Arch | `base-devel pkgconf rust gtk4 libadwaita vte4 libsecret inter-font ttf-jetbrains-mono` |
 | Debian / Ubuntu | `build-essential pkg-config libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libsecret-1-dev fonts-inter fonts-jetbrains-mono` |
 | Fedora / RHEL | `gcc pkgconf-pkg-config gtk4-devel libadwaita-devel libsecret-devel vte291-gtk4-devel` |
 | openSUSE | `gcc pkg-config gtk4-devel libadwaita-devel vte-gtk4-devel libsecret-devel` |
 
-### Rust surumu
+### Rust version
 
-**Rust 1.92 ya da ustu gerekiyor** (gtk4-sys'in MSRV'si). Debian, Ubuntu ve RHEL'in
-paket `rustc`'si bunun altinda kaldigi icin paket listelerinde yok — rustup kullanin:
+**Rust 1.92 or newer is required** (gtk4-sys's MSRV). The packaged `rustc` on
+Debian, Ubuntu and RHEL is below that, which is why it is absent from the
+package lists — use rustup:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup default stable
 ```
 
-Arch'ta dagitim paketi guncel; Flatpak'te `rust-stable` SDK eklentisi hallediyor.
+Arch ships a current package; in Flatpak the `rust-stable` SDK extension
+handles it.
 
-## Parolalar
+## Passwords
 
-Kaydedilen parolalar sistem keyring'ine (Secret Service) yazilir — GNOME Keyring
-ya da KDE'de KWallet. `hosts.toml`'a ya da baska bir dosyaya duz metin parola
-yazilmaz. Baglanirken parola ssh'a `SSH_ASKPASS` uzerinden verilir, yani komut
-satirinda hicbir zaman gorunmez ve `sshpass` gibi bir araca gerek kalmaz.
+Saved passwords go to the system keyring (Secret Service) — GNOME Keyring, or
+KWallet on KDE. No password is written in plain text to `hosts.toml` or any
+other file. On connect the password reaches ssh through `SSH_ASKPASS`, so it
+never appears on a command line and no tool like `sshpass` is needed.
 
-Keyring calismiyorsa (ornegin kwallet/gnome-keyring kapaliysa) parola kaydedilemez;
-uygulama bunu soyler ve ssh parolayi her zamanki gibi terminalde sorar.
+If the keyring is unavailable (gnome-keyring or kwallet not running) the
+password cannot be saved; the app says so and ssh asks in the terminal as
+usual.
 
-## Yazi tipleri
+## Shared SSH channel
 
-Arayuz Inter, kimlikler JetBrains Mono. Ikisi de yoksa `style.css`'teki yedek
-zincir devreye girer (Adwaita Sans / Cantarell, DejaVu Sans Mono) — uygulama
-calisir ama tipografik ikilik zayiflar. Flatpak surumu host'un fontlarini gorur;
-font paketlerini dagitimdan kurmak yeterli.
+Terminal sessions and Monitor probes share one `ControlMaster` channel per
+host, so authentication happens once: with a tab open, a Monitor round rides
+that channel and authenticates not at all.
 
-## Gorsel dogrulama
+A unix socket path is capped at 108 bytes. When the control path would exceed
+that, sharing is disabled silently — slower, but it still connects, which
+beats ssh refusing with "ControlPath too long".
+
+## Fonts
+
+Inter for the interface, JetBrains Mono for identifiers. Without them the
+fallback chain in `style.css` takes over (Adwaita Sans / Cantarell, DejaVu
+Sans Mono): the app runs, but the typographic contrast between human text and
+machine identifiers weakens. The Flatpak build sees the host's fonts, so
+installing the distribution packages is enough.
+
+## Visual verification
 
 ```bash
 ./target/debug/runetty --screenshot /tmp/runetty.png
 ```
 
-Pencereyi offscreen render edip PNG'ye basar ve cikar. Faz 1'in gecme olcutu
-("iki ekran goruntusu yan yana ayirt edilemiyor") bununla olculur.
+Renders the window offscreen to a PNG and exits. `RUNETTY_SCREENSHOT_DELAY_MS`
+stretches the delay for screens still waiting on the network.
 
-```bash
-./target/debug/runetty --version    # gtk ve libadwaita calisma ani surumleri
-```
+Development flags, all of which also force a non-unique instance so they work
+while a window is already open:
+
+| Flag | Purpose |
+| --- | --- |
+| `--screenshot <file>` | Render the window and exit |
+| `--mode <sessions\|agents\|monitor>` | Start in a given mode |
+| `--connect <alias[,alias]>` | Connect; a `+` prefix forces an extra session |
+| `--exec <command>` | Open a tab running a command |
+| `--edit <alias>` | Open the record dialog |
+| `--context-menu <alias>` | Open a row's context menu |
+| `--action <name>` | Trigger a parameterless window action |
+| `--expand <alias>` | Expand a Monitor card's detail |
+| `--demo-metrics` | Fill the rings without a network |
+| `--version` | Print runtime GTK and libadwaita versions |

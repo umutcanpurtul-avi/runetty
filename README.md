@@ -1,39 +1,54 @@
 # runetty
 
-SSH oturumlari, agent'lar ve sunucu izleme icin GTK4 + libadwaita masaustu
-istemcisi. Gorsel dil [docs/plan.md](docs/plan.md)'de; teknik taban ve dagitim matrisi
-[BUILDING.md](BUILDING.md)'de.
+A GTK4 + libadwaita desktop client for SSH sessions, agents and host
+monitoring. The visual language is described in [docs/plan.md](docs/plan.md)
+(written in Turkish); the technical floor and distribution matrix are in
+[BUILDING.md](BUILDING.md).
 
-## Durum
+## Status
 
-Faz 1 — gorsel iskelet.
+Phase 1 — visual skeleton, plus a working data and monitoring layer.
 
-- [x] Tasarim sistemi tek dosyada (`data/resources/style.css`), Rust'ta renk yok
-- [x] Pencere iskeleti: ikon rayi + `OverlaySplitView` + sekmeli icerik
-- [x] Kenar cubugu: Recents / Servers, klasor agaci, iki katmanli satirlar
-- [x] Bos durum: komut alani, "Jump back in" cipleri, klavye ipucu satiri
-- [x] Agent paneli: durum noktasi + hap rozet
-- [x] VTE terminal sekmeleri (`--no-default-features` ile kapatilabilir)
-- [x] Cok dagitimli derleme: Flatpak + dort paket yoneticisi + CI
-- [ ] Komut paleti (Ctrl K)
-- [ ] `~/.ssh/config` okuma
-- [ ] Monitor sayfasi ve halka gostergeler
-- [ ] Ayar diyalogu
+- [x] Design system in a single file (`data/resources/style.css`); no colours in Rust
+- [x] Window skeleton: mode switcher, `OverlaySplitView`, tabbed content
+- [x] Sidebar: Recents / Servers, folder tree, drag and drop, filter
+- [x] Empty state: command field, "Jump back in" chips, keyboard hints
+- [x] VTE terminal tabs (can be turned off with `--no-default-features`)
+- [x] Records from `~/.ssh/config` (read-only) and `hosts.toml`
+- [x] Host key approval on first connect, passwords in the system keyring
+- [x] Monitor: opt-in per host, CPU/MEM/DISK rings, expandable detail
+- [x] Light / dark / system theme, font family and size
+- [x] Multi-distribution builds: Flatpak, four package managers, CI
+- [ ] Command palette (Ctrl K)
+- [ ] Agent panel wired to a real source
 
-## Hizli baslangic
+## Quick start
 
 ```bash
 ./build-aux/install-deps.sh
 cargo build --release
-./target/release/runetty
+./build-aux/install.sh          # installs into ~/.local
+runetty
 ```
 
-Dagitiminiz tabanin altindaysa betik sizi Flatpak'a yonlendirir; ayrintilar
-[BUILDING.md](BUILDING.md)'de.
+If your distribution is below the version floor the script points you at
+Flatpak; see [BUILDING.md](BUILDING.md) for the details.
 
-## Lisans
+## How records are stored
 
-MIT. GTK4/libadwaita (LGPL-2.1) ve VTE (LGPL-3.0) dinamik baglaniyor;
-Inter ve JetBrains Mono OFL.
+| What | Where | Note |
+| --- | --- | --- |
+| Connection settings | `~/.ssh/config` | Read-only. runetty never writes here. |
+| runetty's own records | `~/.config/runetty/hosts.toml` | Folders, watch list, timestamps |
+| Appearance | `~/.config/runetty/settings.toml` | Theme, fonts, layout |
+| Passwords | System keyring | Secret Service; never in a file |
 
-Tasarim dili SigilTTY'den ilham aliyor; ad, logo ve ikon cizimi kendimizin.
+Deleting a record that came from `~/.ssh/config` only hides it from the list,
+and the hide can be undone. That file belongs to `ssh`, `scp` and `rsync` too.
+
+## License
+
+MIT. GTK4/libadwaita (LGPL-2.1) and VTE (LGPL-3.0) are linked dynamically;
+Inter and JetBrains Mono are OFL.
+
+The design language draws on SigilTTY; the name, logo and icon are our own.
