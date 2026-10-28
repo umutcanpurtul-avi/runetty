@@ -69,7 +69,10 @@ impl Sidebar {
         let any_folder = !store.folders().is_empty();
         drop(store);
 
-        self.sessions.append(&rows::section_header("Servers"));
+        let servers = rows::section_header("Servers");
+        // Basliga birakmak sunucuyu klasorden cikarir.
+        attach_drop_target(&servers, None, self);
+        self.sessions.append(&servers);
 
         if all.is_empty() && !any_folder {
             self.sessions.append(&empty_hint(&needle));
@@ -100,6 +103,7 @@ impl Sidebar {
             label.add_css_class("folder-label");
             expander.set_label_widget(Some(&label));
             attach_folder_menu(&label, &folder, self);
+            attach_drop_target(&expander, Some(&folder), self);
             expander.set_expanded(true);
             expander.set_margin_start(6);
             expander.set_child(Some(&if inside.is_empty() {
@@ -124,6 +128,7 @@ impl Sidebar {
         for host in hosts {
             let row = gtk::ListBoxRow::new();
             row.set_child(Some(&rows::host_row(host, self.live.state(&host.alias))));
+            attach_drag_source(&row, &host.alias);
             list.append(&row);
         }
 
@@ -213,6 +218,69 @@ fn context_menu(alias: &str) -> gio::Menu {
         menu.append_item(&item);
     }
     menu
+}
+
+/// Satir surukleniyor: tasinan sey alias, hedef klasor karar veriyor.
+fn attach_drag_source(row: &gtk::ListBoxRow, alias: &str) {
+    let source = gtk::DragSource::new();
+    source.set_actions(gtk::gdk::DragAction::MOVE);
+
+    let alias = alias.to_string();
+    source.connect_prepare(move |_, _, _| {
+        Some(gtk::gdk::ContentProvider::for_value(&alias.to_value()))
+    });
+
+    // Surukleme gorseli satirin kendisi. Satiri closure'da tutmuyoruz:
+    // satir controller'i tutuyor, tersi de olsa referans dongusu olurdu.
+    source.connect_drag_begin(|source, _| {
+        if let Some(widget) = source.widget() {
+            let paintable = gtk::WidgetPaintable::new(Some(&widget));
+            source.set_icon(Some(&paintable), 0, 0);
+        }
+    });
+
+    row.add_controller(source);
+}
+
+/// Klasor basligi ya da "Servers" basligi birakma hedefi.
+/// `folder` None ise sunucu gruptan cikar.
+fn attach_drop_target(
+    widget: &impl IsA<gtk::Widget>,
+    folder: Option<&str>,
+    sidebar: &Rc<Sidebar>,
+) {
+    let target = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+
+    let folder = folder.map(str::to_string);
+    let sidebar = Rc::clone(sidebar);
+    target.connect_drop(move |target, value, _, _| {
+        let Ok(alias) = value.get::<String>() else {
+            return false;
+        };
+
+        if let Some(widget) = target.widget() {
+            widget.remove_css_class("drop-target");
+        }
+
+        sidebar.store.borrow_mut().set_folder(&alias, folder.as_deref());
+        sidebar.refresh();
+        true
+    });
+
+    target.connect_enter(|target, _, _| {
+        if let Some(widget) = target.widget() {
+            widget.add_css_class("drop-target");
+        }
+        gtk::gdk::DragAction::MOVE
+    });
+
+    target.connect_leave(|target| {
+        if let Some(widget) = target.widget() {
+            widget.remove_css_class("drop-target");
+        }
+    });
+
+    widget.as_ref().add_controller(target);
 }
 
 /// Klasor basligina sag tik: silme. Klasor yalnizca bir etiket oldugu icin

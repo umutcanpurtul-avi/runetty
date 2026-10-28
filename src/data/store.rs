@@ -131,6 +131,25 @@ impl Store {
         self.save();
     }
 
+    /// Bir sunucuyu klasore tasir ya da `None` ile gruptan cikarir.
+    /// ssh config'ten gelen kayitlar icin klasor ayri bir eslemede tutulur,
+    /// cunku o dosyaya yazmiyoruz.
+    pub fn set_folder(&mut self, alias: &str, folder: Option<&str>) {
+        match self.file.hosts.iter_mut().find(|host| host.alias == alias) {
+            Some(local) => local.folder = folder.map(str::to_string),
+            None => match folder {
+                Some(name) => {
+                    self.file.folders.insert(alias.to_string(), name.to_string());
+                }
+                None => {
+                    self.file.folders.remove(alias);
+                }
+            },
+        }
+
+        self.save();
+    }
+
     pub fn remove_folder(&mut self, name: &str) {
         self.file.empty_folders.retain(|folder| folder != name);
         for host in self.file.hosts.iter_mut() {
@@ -182,8 +201,11 @@ impl Store {
 
         self.file.last_used.remove(alias);
         self.file.folders.remove(alias);
-        // Kayit gidiyorsa keyring'de parolasi kalmasin.
-        let _ = super::secrets::clear(alias);
+        // Kayit gidiyorsa keyring'de parolasi kalmasin. Kalici depolama
+        // yoksa (testler) keyring'e de dokunmuyoruz.
+        if self.path.is_some() {
+            let _ = super::secrets::clear(alias);
+        }
         self.save();
         deleted
     }
@@ -251,4 +273,100 @@ pub fn config_dir() -> Option<PathBuf> {
 
 fn config_path() -> Option<PathBuf> {
     config_dir().map(|dir| dir.join("hosts.toml"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `path: None` oldugu icin save() erken donuyor: testler diske dokunmaz.
+    fn store(hosts: Vec<LocalHost>, from_ssh: Vec<Host>) -> Store {
+        Store {
+            file: File { hosts, ..Default::default() },
+            path: None,
+            from_ssh,
+        }
+    }
+
+    fn local(alias: &str) -> LocalHost {
+        LocalHost {
+            alias: alias.into(),
+            hostname: "example.test".into(),
+            user: None,
+            port: None,
+            folder: None,
+            identity_file: None,
+        }
+    }
+
+    fn from_config(alias: &str) -> Host {
+        Host {
+            alias: alias.into(),
+            hostname: "example.test".into(),
+            user: None,
+            port: None,
+            folder: None,
+            identity_file: None,
+            last_used: None,
+            source: Source::SshConfig,
+        }
+    }
+
+    #[test]
+    fn moves_local_host_into_folder_and_out() {
+        let mut store = store(vec![local("box")], Vec::new());
+
+        store.set_folder("box", Some("lab"));
+        assert_eq!(store.hosts()[0].folder.as_deref(), Some("lab"));
+
+        store.set_folder("box", None);
+        assert_eq!(store.hosts()[0].folder, None);
+    }
+
+    /// ssh config'ten gelen kaydin klasoru ayri eslemede tutulur;
+    /// kayit yerel kopyaya donusturulmez.
+    #[test]
+    fn folder_for_ssh_config_host_is_kept_aside() {
+        let mut store = store(Vec::new(), vec![from_config("edge")]);
+
+        store.set_folder("edge", Some("prod"));
+
+        let hosts = store.hosts();
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].source, Source::SshConfig);
+        assert_eq!(hosts[0].folder.as_deref(), Some("prod"));
+        assert!(store.file.hosts.is_empty(), "yerel kopya olusturulmamali");
+    }
+
+    #[test]
+    fn deleting_ssh_config_host_hides_it_instead() {
+        let mut store = store(Vec::new(), vec![from_config("edge")]);
+
+        let deleted = store.remove("edge");
+
+        assert!(!deleted, "ssh config kaydi silinmis gibi raporlanmamali");
+        assert!(store.hosts().is_empty(), "listeden dusmeli");
+
+        store.unhide_all();
+        assert_eq!(store.hosts().len(), 1, "geri getirilebilmeli");
+    }
+
+    #[test]
+    fn deleting_local_host_really_removes_it() {
+        let mut store = store(vec![local("box")], Vec::new());
+
+        assert!(store.remove("box"));
+        assert!(store.hosts().is_empty());
+    }
+
+    #[test]
+    fn empty_folder_survives_until_removed() {
+        let mut store = store(Vec::new(), Vec::new());
+
+        store.add_folder("lab");
+        assert_eq!(store.folders(), vec!["lab".to_string()]);
+
+        store.remove_folder("lab");
+        assert!(store.folders().is_empty());
+    }
 }
