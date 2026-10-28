@@ -50,10 +50,15 @@ fn main() -> glib::ExitCode {
     let screenshot = argument_value("--screenshot");
     let exec = argument_value("--exec");
     let autoconnect = argument_value("--connect");
+    let context_menu = argument_value("--context-menu");
 
     // Gelistirme bayraklari acik bir pencere varken de ise yaramali;
     // tek-instance davranisi bunlari calisan surece devredip yutuyor.
-    let flags = if screenshot.is_some() || exec.is_some() || autoconnect.is_some() {
+    let flags = if screenshot.is_some()
+        || exec.is_some()
+        || autoconnect.is_some()
+        || context_menu.is_some()
+    {
         gio::ApplicationFlags::NON_UNIQUE
     } else {
         gio::ApplicationFlags::empty()
@@ -76,7 +81,13 @@ fn main() -> glib::ExitCode {
         .and_then(|value| ui::icon_rail::Mode::parse(&value))
         .unwrap_or(ui::icon_rail::Mode::Sessions);
     app.connect_activate(move |app| {
-        let window = window::build(app, mode, exec.as_deref(), autoconnect.as_deref());
+        let window = window::build(
+                app,
+                mode,
+                exec.as_deref(),
+                autoconnect.as_deref(),
+                context_menu.as_deref(),
+            );
         window.present();
         if let Some(path) = screenshot.clone() {
             capture::schedule(&window, path);

@@ -17,6 +17,7 @@ pub fn build(
     mode: icon_rail::Mode,
     exec: Option<&str>,
     autoconnect: Option<&str>,
+    context_menu: Option<&str>,
 ) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
         .application(app)
@@ -153,6 +154,11 @@ pub fn build(
 
     if let Some(alias) = autoconnect {
         connect(alias);
+    }
+
+    if let Some(alias) = context_menu.map(str::to_string) {
+        let sidebar = Rc::clone(&sidebar);
+        glib::idle_add_local_once(move || sidebar.popup_menu_for(&alias));
     }
 
     window

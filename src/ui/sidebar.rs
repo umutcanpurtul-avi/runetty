@@ -35,6 +35,13 @@ impl Sidebar {
         self.stack.set_visible_child_name(mode.id());
     }
 
+    /// Sag tik menusunu elle acar. `--context-menu <alias>` ile dogrulama icin.
+    pub fn popup_menu_for(&self, alias: &str) {
+        self.menu.set_menu_model(Some(&context_menu(alias)));
+        self.menu.set_pointing_to(Some(&gtk::gdk::Rectangle::new(40, 70, 1, 1)));
+        self.menu.popup();
+    }
+
     /// Liste tek parca halinde yeniden kurulur. Kayit sayisi yuzler
     /// mertebesinde kaldigi surece bu, artimli guncellemeden basit ve yeterli.
     pub fn refresh(self: &Rc<Self>) {
@@ -132,7 +139,7 @@ impl Sidebar {
 
             // Tiklama noktasini menunun bagli oldugu kutunun uzayina tasi.
             let point = list
-                .compute_point(&this.sessions, &gtk::graphene::Point::new(x as f32, y as f32))
+                .compute_point(&this.stack, &gtk::graphene::Point::new(x as f32, y as f32))
                 .unwrap_or_else(|| gtk::graphene::Point::new(x as f32, y as f32));
 
             this.menu.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
@@ -210,8 +217,11 @@ pub fn build(
     view.add_top_bar(&header);
     view.set_content(Some(&stack));
 
+    // Menu `stack`'e bagli, listeyi tasiyan kutuya degil: refresh() o kutunun
+    // butun cocuklarini kaldiriyor ve popover da cocuk sayildigi icin
+    // unparent oluyordu — sonraki sag tikta parent'siz popup = cokme.
     let menu = gtk::PopoverMenu::from_model(None::<&gio::Menu>);
-    menu.set_parent(&sessions);
+    menu.set_parent(&stack);
     menu.set_has_arrow(false);
     menu.set_halign(gtk::Align::Start);
 
