@@ -65,18 +65,16 @@ window.runetty {
                     alpha(#8b5cf6, 0.08) 0%, transparent 58%);
 }
 
-/* --- sol ikon rayi --- */
+/* --- mod secici (kenar cubugu ust bari) --- */
 
 .icon-rail {
-  background-color: @bg_rail;
-  padding: 8px 0;
-  min-width: 44px;
+  padding: 0;
 }
 
 .icon-rail button {
   min-width: 30px;
   min-height: 30px;
-  margin: 2px 7px;
+  margin: 0 1px;
   padding: 0;
   border: none;
   border-radius: 8px;

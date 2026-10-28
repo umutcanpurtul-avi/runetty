@@ -1,4 +1,5 @@
-//! Sol ikon rayi: uc mod, hep ayni yerde, isim kaplamadan.
+//! Mod secici: uc mod, hep ayni yerde, isim kaplamadan.
+//! Kenar cubugunun ust barinda, listenin tam ustunde duruyor.
 
 use gtk::prelude::*;
 
@@ -48,7 +49,7 @@ pub fn build<F>(initial: Mode, on_change: F) -> gtk::Box
 where
     F: Fn(Mode) + Clone + 'static,
 {
-    let rail = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let rail = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     rail.add_css_class("icon-rail");
 
     let modes = [Mode::Sessions, Mode::Agents, Mode::Monitor];

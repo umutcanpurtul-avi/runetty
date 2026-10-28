@@ -90,10 +90,13 @@ pub fn build(
     split.set_min_sidebar_width(220.0);
     split.set_sidebar(Some(&sidebar.widget));
 
+    // Mod secici kenar cubugunun ust barinda: listenin tam ustunde,
+    // hangi listeye baktigin soldaki ayri bir raya bakmadan belli oluyor.
     let rail = icon_rail::build(mode, {
         let sidebar = Rc::clone(&sidebar);
         move |mode| sidebar.set_mode(mode)
     });
+    sidebar.header.pack_start(&rail);
 
     let search = gtk::SearchEntry::new();
     search.add_css_class("global-search");
@@ -103,11 +106,9 @@ pub fn build(
     header.add_css_class("runetty");
     header.set_title_widget(Some(&search));
 
-    // Eylem dugmeleri kenar cubugunun ust barinda duruyor: orasi zaten bostu,
-    // icerik basliginda da arama alani tek basina ortada kaliyor.
-    sidebar.header.pack_end(&icon_button("open-menu-symbolic", "Menu"));
-    sidebar.header.pack_end(&icon_button("preferences-system-symbolic", "Preferences"));
-    sidebar.header.pack_end(&icon_button("view-refresh-symbolic", "Reconnect"));
+    header.pack_end(&icon_button("open-menu-symbolic", "Menu"));
+    header.pack_end(&icon_button("preferences-system-symbolic", "Preferences"));
+    header.pack_end(&icon_button("view-refresh-symbolic", "Reconnect"));
 
     content_stack.set_vexpand(true);
     content_stack.add_named(&empty_page(&empty.widget), Some("empty"));
@@ -119,10 +120,7 @@ pub fn build(
     content_view.set_content(Some(&content_stack));
     split.set_content(Some(&content_view));
 
-    let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    root.append(&rail);
-    root.append(&split);
-    window.set_content(Some(&root));
+    window.set_content(Some(&split));
 
     install_actions(&window, &split, &search, &store, &connect, &refresh);
 
