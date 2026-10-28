@@ -390,3 +390,41 @@ popover.menu separator {
   border-radius: 8px;
   box-shadow: 0 6px 18px alpha(#000000, 0.5);
 }
+
+/* --- monitor --- */
+
+.monitor-card {
+  background-color: @bg_elevated;
+  border: 1px solid @hairline;
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+
+.gauge-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: @fg_tertiary;
+}
+
+/* Halkanin rengi widget'in CSS renginden okunuyor; esik sinifini Rust koyar. */
+.ring            { color: @fg_secondary; }
+.ring.ring-warn  { color: @state_blocked; }
+.ring.ring-alert { color: @state_closed; }
+
+.monitor-error {
+  font-size: 11px;
+  color: @state_closed;
+}
+
+button.retry {
+  color: @accent;
+  background: none;
+  box-shadow: none;
+  border: none;
+  padding: 2px 6px;
+  min-height: 24px;
+  font-size: 11px;
+}
+
+button.retry:hover { background-color: @bg_hover; }

@@ -2,7 +2,7 @@
 //! Veri degisiklikleri tek bir `refresh` uzerinden kenar cubugu ve bos duruma
 //! birlikte yansir; iki yerde ayri durum tutmuyoruz.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -12,7 +12,7 @@ use gtk::{gio, glib};
 use crate::data::sessions::{self, Sessions};
 use crate::data::settings::Settings;
 use crate::data::store::Store;
-use crate::ui::{empty_state, host_dialog, icon_rail, preferences, sidebar};
+use crate::ui::{empty_state, host_dialog, icon_rail, monitor, preferences, sidebar};
 
 pub fn build(
     app: &adw::Application,
@@ -22,6 +22,7 @@ pub fn build(
     context_menu: Option<&str>,
     edit: Option<&str>,
     action: Option<&str>,
+    demo_metrics: bool,
 ) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
         .application(app)
@@ -115,6 +116,8 @@ pub fn build(
         }
     });
 
+    let monitor = monitor::build(Rc::clone(&store));
+
     let split = adw::OverlaySplitView::new();
     split.set_hexpand(true);
     split.set_sidebar_width_fraction(0.22);
@@ -124,9 +127,32 @@ pub fn build(
 
     // Mod secici kenar cubugunun ust barinda: listenin tam ustunde,
     // hangi listeye baktigin soldaki ayri bir raya bakmadan belli oluyor.
+    // Mod hem kenar cubugunu hem icerik alanini degistiriyor: Monitor kendi
+    // sayfasini aciyor, digerleri oturumlara geri donuyor.
+    let current_mode = Rc::new(Cell::new(mode));
+
     let rail = icon_rail::build(mode, {
         let sidebar = Rc::clone(&sidebar);
-        move |mode| sidebar.set_mode(mode)
+        let monitor = Rc::clone(&monitor);
+        let stack = content_stack.clone();
+        let tabs = Rc::clone(&tabs);
+        let current_mode = Rc::clone(&current_mode);
+
+        move |mode| {
+            sidebar.set_mode(mode);
+            current_mode.set(mode);
+
+            let monitoring = mode == icon_rail::Mode::Monitor;
+            monitor.set_active(monitoring);
+
+            stack.set_visible_child_name(if monitoring {
+                "monitor"
+            } else if tabs.view.n_pages() == 0 {
+                "empty"
+            } else {
+                "tabs"
+            });
+        }
     });
     sidebar.header.pack_start(&rail);
 
@@ -144,6 +170,7 @@ pub fn build(
     app_menu.append(Some("New Folder"), Some("win.folder-new"));
     app_menu.append(Some("Reload ~/.ssh/config"), Some("win.reload-ssh-config"));
     app_menu.append(Some("Restore Hidden"), Some("win.restore-hidden"));
+    app_menu.append(Some("About runetty"), Some("win.about"));
     app_menu.append(Some("Quit"), Some("app.quit"));
 
     let menu_button = gtk::MenuButton::new();
@@ -167,6 +194,7 @@ pub fn build(
     content_stack.set_vexpand(true);
     content_stack.add_named(&empty_page(&empty.widget), Some("empty"));
     content_stack.add_named(&tabs_page(&tabs.view), Some("tabs"));
+    content_stack.add_named(&monitor.widget, Some("monitor"));
     content_stack.set_visible_child_name("empty");
 
     let content_view = adw::ToolbarView::new();
@@ -192,12 +220,25 @@ pub fn build(
         refresh: &refresh,
     });
 
-    // Son sekme kapaninca bos duruma geri don.
+    // Son sekme kapaninca bos duruma geri don — ama Monitor acikken degil.
     {
         let stack = content_stack.clone();
+        let current_mode = Rc::clone(&current_mode);
         tabs.view.connect_n_pages_notify(move |view| {
+            if current_mode.get() == icon_rail::Mode::Monitor {
+                return;
+            }
             stack.set_visible_child_name(if view.n_pages() == 0 { "empty" } else { "tabs" });
         });
+    }
+
+    if mode == icon_rail::Mode::Monitor {
+        if demo_metrics {
+            monitor.demo();
+        } else {
+            monitor.set_active(true);
+        }
+        content_stack.set_visible_child_name("monitor");
     }
 
     if let Some(command) = exec {
@@ -625,9 +666,37 @@ fn install_actions(w: Wiring) {
     }
     add(&restore);
 
+    let about = gio::SimpleAction::new("about", None);
+    {
+        let window = window.clone();
+        about.connect_activate(move |_, _| show_about(&window));
+    }
+    add(&about);
+
     let palette = gio::SimpleAction::new("command-palette", None);
     palette.connect_activate(|_, _| glib::g_debug!("runetty", "TODO: command palette"));
     add(&palette);
+}
+
+fn show_about(window: &adw::ApplicationWindow) {
+    let about = adw::AboutDialog::new();
+    about.set_application_name("runetty");
+    about.set_application_icon(crate::config::APP_ID);
+    about.set_version(crate::config::VERSION);
+    about.set_developer_name("Umutcan Purtul");
+    about.set_developers(&[
+        "Umutcan Purtul <purtulumut97@gmail.com>",
+        "Claude — Anthropic",
+    ]);
+    about.set_copyright("© 2026 Umutcan Purtul");
+    about.set_license_type(gtk::License::MitX11);
+    about.set_website("https://github.com/umutcanpurtul-avi/runetty");
+    about.set_comments(
+        "SSH oturumlari, agent'lar ve sunucu izleme icin tek pencere.\n\n\
+         Iletisim: purtulumut97@gmail.com",
+    );
+
+    about.present(Some(window));
 }
 
 fn toast(window: &adw::ApplicationWindow, text: &str) {

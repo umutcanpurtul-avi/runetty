@@ -33,7 +33,13 @@ pub struct Sidebar {
 
 impl Sidebar {
     pub fn set_mode(&self, mode: Mode) {
-        self.stack.set_visible_child_name(mode.id());
+        // Monitor'un kartlari icerik alaninda; kenar cubugu ayni sunucu
+        // listesini gosteriyor, cunku mod dugmeleri de orada duruyor.
+        let page = match mode {
+            Mode::Monitor => Mode::Sessions.id(),
+            other => other.id(),
+        };
+        self.stack.set_visible_child_name(page);
     }
 
     /// Sag tik menusunu elle acar. `--context-menu <alias>` ile dogrulama icin.
@@ -360,7 +366,6 @@ pub fn build(
     let sessions = gtk::Box::new(gtk::Orientation::Vertical, 0);
     stack.add_named(&scrolled(&sessions), Some(Mode::Sessions.id()));
     stack.add_named(&agents_page(), Some(Mode::Agents.id()));
-    stack.add_named(&monitor_placeholder(), Some(Mode::Monitor.id()));
 
     let view = adw::ToolbarView::new();
     view.add_css_class("sidebar-pane");
@@ -425,18 +430,6 @@ fn agents_page() -> gtk::Widget {
     scrolled(&page).upcast()
 }
 
-fn monitor_placeholder() -> gtk::Widget {
-    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    page.append(&rows::section_header("Monitor"));
-
-    let hint = gtk::Label::new(Some("Faz 4"));
-    hint.set_xalign(0.0);
-    hint.set_margin_start(12);
-    hint.add_css_class("row-meta");
-    page.append(&hint);
-
-    page.upcast()
-}
 
 fn footer(sidebar: &Rc<Sidebar>) -> gtk::Box {
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
