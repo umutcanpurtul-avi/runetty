@@ -10,6 +10,7 @@ use gtk::gio;
 use super::icon_rail::Mode;
 use super::model::AGENTS;
 use super::rows;
+use crate::data::sessions::Sessions;
 use crate::data::store::Store;
 use crate::data::Host;
 
@@ -20,7 +21,11 @@ pub struct Sidebar {
     pub header: adw::HeaderBar,
     stack: gtk::Stack,
     sessions: gtk::Box,
+    /// Satirlarin paylastigi tek sag tik menusu. Her satira ayri popover
+    /// takmak, liste her yenilendiginde yetim widget biriktiriyordu.
+    menu: gtk::PopoverMenu,
     store: Rc<RefCell<Store>>,
+    live: Rc<Sessions>,
     connect: Rc<dyn Fn(&str)>,
     filter: RefCell<String>,
 }
@@ -97,26 +102,56 @@ impl Sidebar {
 
         for host in hosts {
             let row = gtk::ListBoxRow::new();
-            row.set_child(Some(&rows::host_row(host)));
-            attach_context_menu(&row, host);
+            row.set_child(Some(&rows::host_row(host, self.live.state(&host.alias))));
             list.append(&row);
         }
 
         let hosts = hosts.to_vec();
+
+        {
+            let hosts = hosts.clone();
+            let this = Rc::clone(self);
+            list.connect_row_activated(move |_, row| {
+                if let Some(host) = hosts.get(row.index() as usize) {
+                    (this.connect)(&host.alias);
+                }
+            });
+        }
+
         let this = Rc::clone(self);
-        list.connect_row_activated(move |_, row| {
-            if let Some(host) = hosts.get(row.index() as usize) {
-                (this.connect)(&host.alias);
-            }
+        let gesture = gtk::GestureClick::new();
+        gesture.set_button(gtk::gdk::BUTTON_SECONDARY);
+        gesture.connect_pressed(move |gesture, _, x, y| {
+            let Some(list) = gesture.widget().and_downcast::<gtk::ListBox>() else {
+                return;
+            };
+            let Some(row) = list.row_at_y(y as i32) else { return };
+            let Some(host) = hosts.get(row.index() as usize) else { return };
+
+            this.menu.set_menu_model(Some(&context_menu(&host.alias)));
+
+            // Tiklama noktasini menunun bagli oldugu kutunun uzayina tasi.
+            let point = list
+                .compute_point(&this.sessions, &gtk::graphene::Point::new(x as f32, y as f32))
+                .unwrap_or_else(|| gtk::graphene::Point::new(x as f32, y as f32));
+
+            this.menu.set_pointing_to(Some(&gtk::gdk::Rectangle::new(
+                point.x() as i32,
+                point.y() as i32,
+                1,
+                1,
+            )));
+            this.menu.popup();
         });
+        list.add_controller(gesture);
 
         list
     }
 }
 
-/// Sag tik: satirin kendi menusu. Eylemler alias'i hedef olarak tasiyor,
-/// boylece pencere seviyesindeki tek eylem her satir icin calisiyor.
-fn attach_context_menu(row: &gtk::ListBoxRow, host: &Host) {
+/// Eylemler alias'i hedef olarak tasiyor, boylece pencere seviyesindeki
+/// tek eylem her satir icin calisiyor.
+fn context_menu(alias: &str) -> gio::Menu {
     let menu = gio::Menu::new();
     for (label, action) in [
         ("Connect", "win.host-connect"),
@@ -124,22 +159,10 @@ fn attach_context_menu(row: &gtk::ListBoxRow, host: &Host) {
         ("Delete", "win.host-delete"),
     ] {
         let item = gio::MenuItem::new(Some(label), None);
-        item.set_action_and_target_value(Some(action), Some(&host.alias.to_variant()));
+        item.set_action_and_target_value(Some(action), Some(&alias.to_variant()));
         menu.append_item(&item);
     }
-
-    let popover = gtk::PopoverMenu::from_model(Some(&menu));
-    popover.set_parent(row);
-    popover.set_has_arrow(false);
-    popover.set_halign(gtk::Align::Start);
-
-    let gesture = gtk::GestureClick::new();
-    gesture.set_button(gtk::gdk::BUTTON_SECONDARY);
-    gesture.connect_pressed(move |_, _, x, y| {
-        popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-        popover.popup();
-    });
-    row.add_controller(gesture);
+    menu
 }
 
 fn empty_hint(needle: &str) -> gtk::Label {
@@ -159,7 +182,11 @@ fn empty_hint(needle: &str) -> gtk::Label {
     label
 }
 
-pub fn build(store: Rc<RefCell<Store>>, connect: Rc<dyn Fn(&str)>) -> Rc<Sidebar> {
+pub fn build(
+    store: Rc<RefCell<Store>>,
+    live: Rc<Sessions>,
+    connect: Rc<dyn Fn(&str)>,
+) -> Rc<Sidebar> {
     let stack = gtk::Stack::new();
     stack.set_transition_type(gtk::StackTransitionType::Crossfade);
     stack.set_transition_duration(120);
@@ -183,12 +210,19 @@ pub fn build(store: Rc<RefCell<Store>>, connect: Rc<dyn Fn(&str)>) -> Rc<Sidebar
     view.add_top_bar(&header);
     view.set_content(Some(&stack));
 
+    let menu = gtk::PopoverMenu::from_model(None::<&gio::Menu>);
+    menu.set_parent(&sessions);
+    menu.set_has_arrow(false);
+    menu.set_halign(gtk::Align::Start);
+
     let sidebar = Rc::new(Sidebar {
         widget: view,
         header,
         stack,
+        menu,
         sessions,
         store,
+        live,
         connect,
         filter: RefCell::new(String::new()),
     });

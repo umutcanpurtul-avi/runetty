@@ -4,6 +4,7 @@
 use gtk::prelude::*;
 
 use super::model::Agent;
+use crate::data::sessions::State;
 use crate::data::{self, Host};
 
 pub fn section_header(text: &str) -> gtk::Label {
@@ -63,10 +64,14 @@ fn two_layer(title: &str, subtitle: &str, lead: Option<gtk::Widget>, trail: gtk:
     row
 }
 
-pub fn host_row(host: &Host) -> gtk::Box {
+pub fn host_row(host: &Host, state: State) -> gtk::Box {
     let when = gtk::Label::new(Some(&data::relative(host.last_used)));
     when.add_css_class("row-meta");
-    two_layer(&host.alias, &host.user_host(), None, when.upcast())
+
+    let dot = status_dot(state.css());
+    dot.set_tooltip_text(Some(state.tooltip()));
+
+    two_layer(&host.alias, &host.user_host(), Some(dot.upcast()), when.upcast())
 }
 
 pub fn agent_row(agent: &Agent) -> gtk::Box {

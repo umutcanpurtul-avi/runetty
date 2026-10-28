@@ -310,3 +310,48 @@ tabbar.runetty tabbox > tab:checked {
   font-weight: 500;
   color: @fg_secondary;
 }
+
+/* --- popover ve menuler --- */
+
+popover > contents,
+popover.menu > contents {
+  background-color: @bg_elevated;
+  border: 1px solid @hairline;
+  border-radius: 12px;
+  padding: 4px;
+  box-shadow: 0 8px 24px alpha(#000000, 0.45);
+}
+
+popover > arrow,
+popover.menu > arrow {
+  background-color: @bg_elevated;
+  border: 1px solid @hairline;
+}
+
+popover.menu modelbutton {
+  min-height: 30px;
+  border-radius: 8px;
+  padding: 2px 10px;
+  color: @fg_secondary;
+  font-size: 12px;
+}
+
+popover.menu modelbutton:hover {
+  background-color: @bg_hover;
+  color: @fg_primary;
+}
+
+popover.menu separator {
+  background-color: @hairline;
+  margin: 4px 2px;
+}
+
+/* --- baglanti durumu noktasi --- */
+
+@define-color state_open    #4ade80;
+@define-color state_trouble #e8a33d;
+@define-color state_closed  #f4766d;
+
+.status-dot.open    { background-color: @state_open; }
+.status-dot.trouble { background-color: @state_trouble; }
+.status-dot.closed  { background-color: alpha(#f4766d, 0.55); }

@@ -5,6 +5,9 @@ use gtk::prelude::*;
 use gtk::{gdk, gio, glib, pango};
 use vte::prelude::*;
 
+/// Sarmalayicinin cikis kodunu bildirdigi baslik oneki.
+const STATUS_PREFIX: &str = "runetty-status:";
+
 const PALETTE: [&str; 16] = [
     "#0d0d12", "#f4766d", "#4ade80", "#e8a33d",
     "#4a7dff", "#b283f0", "#4fd6d2", "#9aa0ab",
@@ -14,7 +17,14 @@ const PALETTE: [&str; 16] = [
 
 /// `command` bos ise kullanicinin kabugu acilir.
 /// `alias` verilirse parola keyring'den SSH_ASKPASS uzerinden beslenir.
-pub fn page(command: Option<&str>, alias: Option<&str>) -> gtk::Widget {
+/// `on_status` komut bitince cikis koduyla cagrilir; durum noktasi buna bakar.
+pub fn page<F>(command: Option<&str>, alias: Option<&str>, on_status: F) -> gtk::Widget
+where
+    F: Fn(i32) + 'static,
+{
+    use std::rc::Rc;
+
+    let on_status = Rc::new(on_status);
     let term = vte::Terminal::new();
     term.add_css_class("terminal-page");
     term.set_hexpand(true);
@@ -33,11 +43,15 @@ pub fn page(command: Option<&str>, alias: Option<&str>) -> gtk::Widget {
     let argv: Vec<String> = match command {
         // Komut bitince kullaniciyi sessizce yerel kabuga dusurmek yerine
         // cikis kodunu goster ve sekmeyi acik tut.
+        // Cikis kodu pencere basligi uzerinden geri geliyor: sarmalayici
+        // `read` ile bekledigi icin surec olmuyor, yani child-exited yetmiyor.
         Some(cmd) => vec![
             "/bin/sh".into(),
             "-c".into(),
             format!(
-                "{cmd}; status=$?; printf '\\n\\033[2m[runetty] cikis kodu %s — \
+                "{cmd}; status=$?; \
+                 printf '\\033]0;{STATUS_PREFIX}%s\\007' \"$status\"; \
+                 printf '\\n\\033[2m[runetty] cikis kodu %s — \
                  kapatmak icin Enter\\033[0m\\n' \"$status\"; read _",
                 cmd = cmd
             ),
@@ -78,6 +92,19 @@ pub fn page(command: Option<&str>, alias: Option<&str>) -> gtk::Widget {
             }
         },
     );
+
+    {
+        let on_status = Rc::clone(&on_status);
+        term.connect_window_title_changed(move |term| {
+            let Some(title) = term.window_title() else { return };
+            let Some(rest) = title.strip_prefix(STATUS_PREFIX) else { return };
+            if let Ok(status) = rest.trim().parse::<i32>() {
+                on_status(status);
+            }
+        });
+    }
+
+    term.connect_child_exited(move |_, status| on_status(status));
 
     let scroller = gtk::ScrolledWindow::new();
     scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
