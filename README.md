@@ -1,8 +1,7 @@
 # runetty
 
 A GTK4 + libadwaita desktop client for SSH sessions, agents and host
-monitoring. The visual language is described in [docs/plan.md](docs/plan.md)
-(written in Turkish); the technical floor and distribution matrix are in
+monitoring. The technical floor and distribution matrix are in
 [BUILDING.md](BUILDING.md).
 
 ## Status

@@ -15,10 +15,51 @@ printf 'CPUS\\n'; nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo; \
 printf 'DISK\\n'; df -P / | tail -1";
 
 /// CPU scheduler counters. The percentage comes from the delta between two samples.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CpuTimes {
     pub total: u64,
     pub idle: u64,
+    pub user: u64,
+    pub system: u64,
+    pub iowait: u64,
+    pub steal: u64,
+}
+
+/// Where the CPU time went between two samples, as percentages.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CpuBreakdown {
+    pub user: f64,
+    pub system: f64,
+    pub iowait: f64,
+    pub steal: f64,
+    pub idle: f64,
+}
+
+impl CpuBreakdown {
+    pub fn busy(&self) -> f64 {
+        (100.0 - self.idle).clamp(0.0, 100.0)
+    }
+}
+
+/// Needs two samples, like `cpu_percent`.
+pub fn cpu_breakdown(previous: Option<CpuTimes>, current: CpuTimes) -> Option<CpuBreakdown> {
+    let previous = previous?;
+    let total = current.total.checked_sub(previous.total)?;
+    if total == 0 {
+        return None;
+    }
+
+    let share = |now: u64, before: u64| {
+        now.checked_sub(before).unwrap_or(0) as f64 * 100.0 / total as f64
+    };
+
+    Some(CpuBreakdown {
+        user: share(current.user, previous.user),
+        system: share(current.system, previous.system),
+        iowait: share(current.iowait, previous.iowait),
+        steal: share(current.steal, previous.steal),
+        idle: share(current.idle, previous.idle),
+    })
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,6 +67,8 @@ pub struct Sample {
     pub cpu: CpuTimes,
     pub mem_total_kb: u64,
     pub mem_available_kb: u64,
+    pub mem_free_kb: u64,
+    pub mem_cached_kb: u64,
     pub uptime_seconds: u64,
     pub cores: u32,
     pub disk_used_percent: f64,
@@ -89,6 +132,8 @@ pub fn parse(output: &str) -> Option<Sample> {
     let mut cpu = None;
     let mut mem_total = 0;
     let mut mem_available = 0;
+    let mut mem_free = 0;
+    let mut mem_cached = 0;
     let mut uptime = 0;
     let mut cores = 0;
     let mut disk_used = 0.0;
@@ -121,6 +166,11 @@ pub fn parse(output: &str) -> Option<Sample> {
                     mem_total = value;
                 } else if line.starts_with("MemAvailable") {
                     mem_available = value;
+                } else if line.starts_with("MemFree") {
+                    mem_free = value;
+                } else if line.starts_with("Cached") || line.starts_with("Buffers") {
+                    // Page cache: Cached plus Buffers, as `free` reports it.
+                    mem_cached += value;
                 }
             }
             "up" => uptime = line.split('.').next()?.parse().ok()?,
@@ -141,6 +191,8 @@ pub fn parse(output: &str) -> Option<Sample> {
         cpu: cpu?,
         mem_total_kb: mem_total,
         mem_available_kb: mem_available,
+        mem_free_kb: mem_free,
+        mem_cached_kb: mem_cached,
         uptime_seconds: uptime,
         cores,
         disk_used_percent: disk_used,
@@ -159,9 +211,18 @@ fn parse_cpu(line: &str) -> Option<CpuTimes> {
         return None;
     }
 
-    // idle + iowait: both mean "no work being done".
-    let idle = values[3] + values.get(4).copied().unwrap_or(0);
-    Some(CpuTimes { total: values.iter().sum(), idle })
+    let at = |index: usize| values.get(index).copied().unwrap_or(0);
+
+    // /proc/stat: user nice system idle iowait irq softirq steal
+    // idle + iowait both mean "no work being done".
+    Some(CpuTimes {
+        total: values.iter().sum(),
+        idle: values[3] + at(4),
+        user: values[0] + at(1),
+        system: values[2] + at(5) + at(6),
+        iowait: at(4),
+        steal: at(7),
+    })
 }
 
 /// `ssh` arguments that run the probe over the persistent channel.
@@ -250,13 +311,13 @@ DISK
 /// processes on top of the card probe; still one command, still one channel.
 pub const DETAIL_PROBE: &str = "\
 printf 'STAT\\n'; head -1 /proc/stat; \
-printf 'MEM\\n'; grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo; \
+printf 'MEM\\n'; grep -E '^(MemTotal|MemAvailable|MemFree|Cached|Buffers|SwapTotal|SwapFree):' /proc/meminfo; \
 printf 'UP\\n'; cut -d' ' -f1 /proc/uptime; \
 printf 'CPUS\\n'; nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo; \
 printf 'LOAD\\n'; cut -d' ' -f1-3 /proc/loadavg; \
 printf 'DISKS\\n'; df -P -x tmpfs -x devtmpfs -x squashfs -x efivarfs -x overlay 2>/dev/null | tail -n +2; \
 printf 'NET\\n'; tail -n +3 /proc/net/dev; \
-printf 'PROCS\\n'; ps -eo pcpu,pmem,pid,comm --sort=-pcpu 2>/dev/null | tail -n +2 | head -10";
+printf 'PROCS\\n'; ps -eo pcpu,pmem,pid,args --sort=-pcpu 2>/dev/null | tail -n +2 | head -12";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Disk {
@@ -272,6 +333,42 @@ pub struct Interface {
     pub name: String,
     pub rx_bytes: u64,
     pub tx_bytes: u64,
+}
+
+/// Per-second rates, derived from two readings of the same counters.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Rate {
+    pub rx: f64,
+    pub tx: f64,
+}
+
+/// Counters reset on reboot or when an interface is recreated; a negative
+/// delta means "no rate" rather than a wild number.
+pub fn rate(previous: &Interface, current: &Interface, seconds: f64) -> Rate {
+    if seconds <= 0.0 {
+        return Rate::default();
+    }
+
+    let delta = |now: u64, before: u64| {
+        now.checked_sub(before).map(|d| d as f64 / seconds).unwrap_or(0.0)
+    };
+
+    Rate {
+        rx: delta(current.rx_bytes, previous.rx_bytes),
+        tx: delta(current.tx_bytes, previous.tx_bytes),
+    }
+}
+
+/// "144 kB/s"
+pub fn human_rate(bytes_per_second: f64) -> String {
+    let value = bytes_per_second.max(0.0);
+    if value >= 1_048_576.0 {
+        format!("{:.1} MB/s", value / 1_048_576.0)
+    } else if value >= 1024.0 {
+        format!("{:.0} kB/s", value / 1024.0)
+    } else {
+        format!("{value:.0} B/s")
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
