@@ -1,5 +1,5 @@
-//! Kenar cubugu: moda gore degisen liste, altta sabit arac bari.
-//! Liste `crate::data::store::Store`'dan kurulur ve her degisiklikte tazelenir.
+//! Sidebar: a list that follows the active mode, with a fixed tool bar below.
+//! Built from `crate::data::store::Store` and refreshed on every change.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -16,17 +16,17 @@ use crate::data::Host;
 
 pub struct Sidebar {
     pub widget: adw::ToolbarView,
-    /// Kenar cubugunun ust bari. Pencere eylemleri buraya yerlesiyor:
-    /// basliktaki bos alani kullaniyor ve arama alanini ortada yalniz birakiyor.
+    /// The sidebar's top bar. Window actions live here: it uses the empty
+    /// space in the header and leaves the search field alone in the centre.
     pub header: adw::HeaderBar,
     stack: gtk::Stack,
     sessions: gtk::Box,
-    /// Satirlarin paylastigi tek sag tik menusu. Her satira ayri popover
-    /// takmak, liste her yenilendiginde yetim widget biriktiriyordu.
+    /// One context menu shared by all rows. Attaching a popover per row
+    /// leaked orphaned widgets on every refresh.
     menu: gtk::PopoverMenu,
     store: Rc<RefCell<Store>>,
     live: Rc<Sessions>,
-    /// Klasor satirindaki + dugmesi buradan yeni kayit diyalogunu aciyor.
+    /// The + button on a folder row opens the new-record dialog from here.
     new_in_folder: RefCell<Option<Rc<dyn Fn(&str)>>>,
     connect: Rc<dyn Fn(&str)>,
     connect_new: Rc<dyn Fn(&str)>,
@@ -34,14 +34,14 @@ pub struct Sidebar {
 }
 
 impl Sidebar {
-    /// Pencere kurulduktan sonra baglanir: diyalog bir ust pencere istiyor.
+    /// Wired after the window exists: the dialog needs a parent window.
     pub fn set_new_in_folder(&self, callback: Rc<dyn Fn(&str)>) {
         *self.new_in_folder.borrow_mut() = Some(callback);
     }
 
     pub fn set_mode(&self, mode: Mode) {
-        // Monitor'un kartlari icerik alaninda; kenar cubugu ayni sunucu
-        // listesini gosteriyor, cunku mod dugmeleri de orada duruyor.
+        // Monitor's cards live in the content area; the sidebar shows the same
+        // host list, because the mode buttons sit there too.
         let page = match mode {
             Mode::Monitor => Mode::Sessions.id(),
             other => other.id(),
@@ -49,7 +49,7 @@ impl Sidebar {
         self.stack.set_visible_child_name(page);
     }
 
-    /// Sag tik menusunu elle acar. `--context-menu <alias>` ile dogrulama icin.
+    /// Opens the context menu programmatically, for `--context-menu <alias>`.
     pub fn popup_menu_for(&self, alias: &str) {
         let monitored = self.store.borrow().is_monitored(alias);
         self.menu.set_menu_model(Some(&context_menu(alias, monitored)));
@@ -57,8 +57,8 @@ impl Sidebar {
         self.menu.popup();
     }
 
-    /// Liste tek parca halinde yeniden kurulur. Kayit sayisi yuzler
-    /// mertebesinde kaldigi surece bu, artimli guncellemeden basit ve yeterli.
+    /// The list is rebuilt wholesale. While record counts stay in the hundreds
+    /// this is simpler than incremental updates and quite enough.
     pub fn refresh(self: &Rc<Self>) {
         while let Some(child) = self.sessions.first_child() {
             self.sessions.remove(&child);
@@ -84,7 +84,7 @@ impl Sidebar {
         drop(store);
 
         let servers = rows::section_header("Servers");
-        // Basliga birakmak sunucuyu klasorden cikarir.
+        // Dropping on the header ungroups the host.
         attach_drop_target(&servers, None, self);
         self.sessions.append(&servers);
 
@@ -93,8 +93,8 @@ impl Sidebar {
             return;
         }
 
-        // Bos klasorler de gorunur: kullanici once klasoru olusturup
-        // sonra icine sunucu ekleyebilsin.
+        // Empty folders stay visible so a folder can be created first and
+        // filled afterwards.
         let folders = if needle.is_empty() {
             self.store.borrow().folders()
         } else {
@@ -156,8 +156,9 @@ impl Sidebar {
             });
         }
 
-        // Ctrl+tik ve orta tik: ayni sunucuya ek oturum. Sade tik, var olan
-        // sekmeye goturdugu icin ikinci oturumun ayri bir yolu olmali.
+        // Ctrl-click and middle-click open an extra session to the same host.
+        // A plain click focuses the existing tab, so a second session needs
+        // its own route.
         {
             let hosts = hosts.clone();
             let this = Rc::clone(self);
@@ -197,7 +198,7 @@ impl Sidebar {
             let monitored = this.store.borrow().is_monitored(&host.alias);
             this.menu.set_menu_model(Some(&context_menu(&host.alias, monitored)));
 
-            // Tiklama noktasini menunun bagli oldugu kutunun uzayina tasi.
+            // Translate the click point into the space the menu is anchored in.
             let point = list
                 .compute_point(&this.stack, &gtk::graphene::Point::new(x as f32, y as f32))
                 .unwrap_or_else(|| gtk::graphene::Point::new(x as f32, y as f32));
@@ -216,13 +217,13 @@ impl Sidebar {
     }
 }
 
-/// Eylemler alias'i hedef olarak tasiyor, boylece pencere seviyesindeki
-/// tek eylem her satir icin calisiyor.
+/// Actions carry the alias as their target, so one window-level action
+/// serves every row.
 fn context_menu(alias: &str, monitored: bool) -> gio::Menu {
     let monitor_label = if monitored {
-        "Monitor'den cikar"
+        "Remove from Monitor"
     } else {
-        "Monitor'e ekle"
+        "Add to Monitor"
     };
 
     let menu = gio::Menu::new();
@@ -240,7 +241,7 @@ fn context_menu(alias: &str, monitored: bool) -> gio::Menu {
     menu
 }
 
-/// Satir surukleniyor: tasinan sey alias, hedef klasor karar veriyor.
+/// Row drag source: what moves is the alias, the target folder decides where.
 fn attach_drag_source(row: &gtk::ListBoxRow, alias: &str) {
     let source = gtk::DragSource::new();
     source.set_actions(gtk::gdk::DragAction::MOVE);
@@ -250,8 +251,8 @@ fn attach_drag_source(row: &gtk::ListBoxRow, alias: &str) {
         Some(gtk::gdk::ContentProvider::for_value(&alias.to_value()))
     });
 
-    // Surukleme gorseli satirin kendisi. Satiri closure'da tutmuyoruz:
-    // satir controller'i tutuyor, tersi de olsa referans dongusu olurdu.
+    // The drag image is the row itself. We do not hold the row in the closure:
+    // the row owns the controller, and the reverse would make a reference cycle.
     source.connect_drag_begin(|source, _| {
         if let Some(widget) = source.widget() {
             let paintable = gtk::WidgetPaintable::new(Some(&widget));
@@ -262,8 +263,8 @@ fn attach_drag_source(row: &gtk::ListBoxRow, alias: &str) {
     row.add_controller(source);
 }
 
-/// Klasor basligi ya da "Servers" basligi birakma hedefi.
-/// `folder` None ise sunucu gruptan cikar.
+/// Drop target for a folder header or the "Servers" header.
+/// A `folder` of None ungroups the host.
 fn attach_drop_target(
     widget: &impl IsA<gtk::Widget>,
     folder: Option<&str>,
@@ -303,7 +304,7 @@ fn attach_drop_target(
     widget.as_ref().add_controller(target);
 }
 
-/// Klasor satiri: ad, yaninda yeniden adlandirma ve "bu klasore yeni sunucu".
+/// Folder row: the name, plus rename and "new host in this folder".
 fn folder_header(folder: &str, sidebar: &Rc<Sidebar>) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     row.add_css_class("folder-header");
@@ -314,7 +315,7 @@ fn folder_header(folder: &str, sidebar: &Rc<Sidebar>) -> gtk::Box {
     label.set_xalign(0.0);
     row.append(&label);
 
-    let rename = folder_button("document-edit-symbolic", "Klasoru yeniden adlandir");
+    let rename = folder_button("document-edit-symbolic", "Rename folder");
     {
         let sidebar = Rc::clone(sidebar);
         let folder = folder.to_string();
@@ -322,7 +323,7 @@ fn folder_header(folder: &str, sidebar: &Rc<Sidebar>) -> gtk::Box {
     }
     row.append(&rename);
 
-    let add = folder_button("list-add-symbolic", "Bu klasore yeni sunucu");
+    let add = folder_button("list-add-symbolic", "New host in this folder");
     {
         let sidebar = Rc::clone(sidebar);
         let folder = folder.to_string();
@@ -349,16 +350,16 @@ fn folder_button(icon: &str, tooltip: &str) -> gtk::Button {
 
 fn rename_folder(sidebar: &Rc<Sidebar>, folder: &str) {
     let entry = adw::EntryRow::new();
-    entry.set_title("Klasor adi");
+    entry.set_title("Folder name");
     entry.set_text(folder);
 
     let group = adw::PreferencesGroup::new();
     group.add(&entry);
 
-    let dialog = adw::AlertDialog::new(Some("Klasoru yeniden adlandir"), None);
+    let dialog = adw::AlertDialog::new(Some("Rename folder"), None);
     dialog.set_extra_child(Some(&group));
-    dialog.add_response("cancel", "Vazgec");
-    dialog.add_response("rename", "Kaydet");
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("rename", "Save");
     dialog.set_response_appearance("rename", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("rename"));
     dialog.set_close_response("cancel");
@@ -372,7 +373,7 @@ fn rename_folder(sidebar: &Rc<Sidebar>, folder: &str) {
 
         let new = entry.text().trim().to_string();
         if new.is_empty() {
-            dialog.set_body("Klasor adi bos birakilamaz.");
+            dialog.set_body("The folder name cannot be empty.");
             return;
         }
 
@@ -383,8 +384,8 @@ fn rename_folder(sidebar: &Rc<Sidebar>, folder: &str) {
     dialog.present(Some(&sidebar.widget));
 }
 
-/// Klasor adina sag tik: silme. Klasor yalnizca bir etiket oldugu icin
-/// silmek sunuculari silmez, sadece gruptan cikarir.
+/// Right-click a folder name to delete it. A folder is only a label, so
+/// deleting it removes no hosts; it just ungroups them.
 fn attach_folder_menu(label: &gtk::Label, folder: &str, sidebar: &Rc<Sidebar>) {
     let gesture = gtk::GestureClick::new();
     gesture.set_button(gtk::gdk::BUTTON_SECONDARY);
@@ -393,10 +394,10 @@ fn attach_folder_menu(label: &gtk::Label, folder: &str, sidebar: &Rc<Sidebar>) {
     let sidebar = Rc::clone(sidebar);
     gesture.connect_pressed(move |_, _, _, _| {
         let dialog = adw::AlertDialog::new(
-            Some("Delete Folder"),
+            Some("Delete folder"),
             Some(&format!(
-                "\"{folder}\" klasoru kaldirilsin mi? Icindeki sunucular silinmez, \
-                 yalnizca gruptan cikar."
+                "Remove the folder \"{folder}\"? The hosts inside are not deleted, \
+                 they are only ungrouped."
             )),
         );
         dialog.add_response("cancel", "Cancel");
@@ -421,7 +422,7 @@ fn attach_folder_menu(label: &gtk::Label, folder: &str, sidebar: &Rc<Sidebar>) {
 }
 
 fn empty_folder_hint() -> gtk::Label {
-    let label = gtk::Label::new(Some("Bos — Edit ile bir sunucuyu buraya tasiyin"));
+    let label = gtk::Label::new(Some("Empty - move a host here with Edit"));
     label.set_xalign(0.0);
     label.set_margin_start(18);
     label.set_margin_bottom(4);
@@ -431,9 +432,9 @@ fn empty_folder_hint() -> gtk::Label {
 
 fn empty_hint(needle: &str) -> gtk::Label {
     let text = if needle.is_empty() {
-        "Kayit yok. Alttaki + ile ekleyin ya da ~/.ssh/config olusturun."
+        "No records. Add one with + below, or create ~/.ssh/config."
     } else {
-        "Eslesen kayit yok."
+        "No matching records."
     };
 
     let label = gtk::Label::new(Some(text));
@@ -466,7 +467,7 @@ pub fn build(
     view.set_top_bar_style(adw::ToolbarStyle::Flat);
     view.set_bottom_bar_style(adw::ToolbarStyle::Flat);
 
-    // Kenar cubugunun ustunde baslik yok; pencereyi surukleyebilmek icin bos bar.
+    // No title above the sidebar; an empty bar so the window can be dragged.
     let header = adw::HeaderBar::new();
     header.set_show_title(false);
     header.set_show_end_title_buttons(false);
@@ -474,9 +475,9 @@ pub fn build(
     view.add_top_bar(&header);
     view.set_content(Some(&stack));
 
-    // Menu `stack`'e bagli, listeyi tasiyan kutuya degil: refresh() o kutunun
-    // butun cocuklarini kaldiriyor ve popover da cocuk sayildigi icin
-    // unparent oluyordu — sonraki sag tikta parent'siz popup = cokme.
+    // The menu is parented to `stack`, not the box holding the list: refresh()
+    // removes every child of that box, and the popover counted as one, so it
+    // was unparented and the next right-click popped up with no parent - a crash.
     let menu = gtk::PopoverMenu::from_model(None::<&gio::Menu>);
     menu.set_parent(&stack);
     menu.set_has_arrow(false);
@@ -533,7 +534,7 @@ fn footer(sidebar: &Rc<Sidebar>) -> gtk::Box {
     let menu = gio::Menu::new();
     menu.append(Some("New Session"), Some("win.host-new"));
     menu.append(Some("Reload ~/.ssh/config"), Some("win.reload-ssh-config"));
-    menu.append(Some("Restore Hidden"), Some("win.restore-hidden"));
+    menu.append(Some("Restore hidden records"), Some("win.restore-hidden"));
 
     let add = gtk::MenuButton::new();
     add.set_icon_name("list-add-symbolic");

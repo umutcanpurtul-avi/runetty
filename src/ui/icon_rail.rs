@@ -1,5 +1,5 @@
-//! Mod secici: uc mod, hep ayni yerde, isim kaplamadan.
-//! Kenar cubugunun ust barinda, listenin tam ustunde duruyor.
+//! Mode switcher: three modes, always in the same place, without taking up
+//! room for names. Sits in the sidebar's top bar, right above the list.
 
 use gtk::prelude::*;
 

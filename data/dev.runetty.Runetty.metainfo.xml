@@ -7,8 +7,8 @@
   <summary>SSH session manager and terminal</summary>
   <description>
     <p>
-      SSH oturumlarini, calisan agent'lari ve sunucu metriklerini tek pencerede
-      toplayan bir terminal istemcisi.
+      A terminal client that gathers SSH sessions, running agents and host
+      metrics into a single window.
     </p>
   </description>
   <launchable type="desktop-id">dev.runetty.Runetty.desktop</launchable>
@@ -19,7 +19,7 @@
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="0.1.0" date="2026-10-28">
-      <description><p>Ilk gorsel iskelet.</p></description>
+      <description><p>First visual skeleton.</p></description>
     </release>
   </releases>
 </component>

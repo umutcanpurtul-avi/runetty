@@ -1,8 +1,8 @@
-# Flatpak, runetty'nin birincil dagitim bicimi.
-# Gerekcesi: GTK/libadwaita surumleri dagitimlar arasinda cok ayrisiyor
-# (Rocky 9'da GTK 4.6, Arch'ta 4.20+). Runtime bunu sabitler.
+# Flatpak is runetty's primary distribution format.
+# Reason: GTK and libadwaita versions diverge widely across distributions
+# (GTK 4.6 on Rocky 9, 4.20+ on Arch). The runtime pins them.
 #
-# Derleme:
+# Build:
 #   flatpak install -y flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
 #       org.freedesktop.Sdk.Extension.rust-stable//25.08
 #   python3 build-aux/flatpak-cargo-generator.py Cargo.lock -o build-aux/cargo-sources.json
@@ -28,19 +28,19 @@ finish-args:
   - --socket=fallback-x11
   - --share=ipc
   - --device=dri
-  # SSH: ag, anahtarlar ve ~/.ssh/config
+  # SSH: network, keys and ~/.ssh/config
   - --share=network
   - --socket=ssh-auth
   - --filesystem=~/.ssh
-  # Kayitlar yerel kurulumla ayni dosyada dursun.
+  # Keep records in the same file as a native install.
   - --filesystem=xdg-config/runetty:create
   - --filesystem=home
   - --talk-name=org.freedesktop.Notifications
-  # Parolalar sistem keyring'inde; Secret Service erisimi gerekli.
+  # Passwords live in the system keyring; Secret Service access is required.
   - --talk-name=org.freedesktop.secrets
 
 modules:
-  # GNOME runtime'inin vte surumu degisebiliyor; kendi surumumuzu sabitliyoruz.
+  # The GNOME runtime's vte version can shift; we pin our own.
   - name: vte
     buildsystem: meson
     config-opts:

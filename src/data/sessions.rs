@@ -1,5 +1,5 @@
-//! Hangi sunucunun acik oturumu var? Kenar cubugundaki durum noktasi buradan
-//! besleniyor. Sekme acilip kapandikca guncellenir, diske yazilmaz.
+//! Which hosts have a live session? The sidebar status dot reads from here.
+//! Updated as tabs open and close; never written to disk.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -7,11 +7,11 @@ use std::rc::Rc;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum State {
-    /// Sekmesi acik ve sureci calisiyor.
+    /// Tab is open and its process is running.
     Open,
-    /// Sekme hala acik ama surec sifirdan farkli kodla bitti.
+    /// Tab is still open but the process exited non-zero.
     Trouble,
-    /// Acik oturum yok.
+    /// No open session.
     Closed,
 }
 
@@ -26,9 +26,9 @@ impl State {
 
     pub fn tooltip(self) -> &'static str {
         match self {
-            Self::Open => "Bagli",
-            Self::Trouble => "Baglanti dustu",
-            Self::Closed => "Acik oturum yok",
+            Self::Open => "Connected",
+            Self::Trouble => "Connection dropped",
+            Self::Closed => "No open session",
         }
     }
 }

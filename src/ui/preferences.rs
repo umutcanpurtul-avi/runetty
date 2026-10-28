@@ -1,5 +1,5 @@
-//! Ayar diyalogu. Su an yalnizca gorunum; baglanti alanlari sunucu basina
-//! tanimli oldugu icin orada degil, kayit diyalogunda duruyor.
+//! Preferences dialog. Appearance only for now: connection fields are defined
+//! per host, so they live in the record dialog instead.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,11 +24,11 @@ where
     let apply = Rc::clone(&apply_early);
 
     let appearance = adw::PreferencesGroup::new();
-    appearance.set_title("Tema");
+    appearance.set_title("Theme");
 
     let theme_row = adw::ComboRow::new();
-    theme_row.set_title("Renk semasi");
-    theme_row.set_subtitle("Sistem secenegi masaustunun ayarini takip eder");
+    theme_row.set_title("Colour scheme");
+    theme_row.set_subtitle("System follows the desktop setting");
 
     let names: Vec<&str> = Theme::all().iter().map(|theme| theme.label()).collect();
     let model = gtk::StringList::new(&names);
@@ -64,12 +64,12 @@ where
     let fonts = adw::PreferencesGroup::new();
     fonts.set_title("Fonts");
     fonts.set_description(Some(
-        "Degisiklik aninda uygulanir ve acik terminallere de yansir.",
+        "Changes apply at once and reach open terminals too.",
     ));
 
-    // Aile ve boyut ayri kontroller: font diyalogu yalnizca aile secimi
-    // icin aciliyordu ve "sadece boyutu degistir" diye bir yol yoktu.
-    let interface_family = family_row("Arayuz yazi tipi", &settings.borrow().appearance.interface_font, {
+    // Family and size are separate controls: the font dialog only offered a
+    // family, leaving no way to change just the size.
+    let interface_family = family_row("Interface font", &settings.borrow().appearance.interface_font, {
         let settings = Rc::clone(&settings);
         let apply = Rc::clone(&apply);
         move |name| {
@@ -82,7 +82,7 @@ where
         }
     });
 
-    let interface_size = size_row("Arayuz boyutu", settings.borrow().appearance.interface_size, {
+    let interface_size = size_row("Interface size", settings.borrow().appearance.interface_size, {
         let settings = Rc::clone(&settings);
         let apply = Rc::clone(&apply);
         move |value| {
@@ -95,7 +95,7 @@ where
         }
     });
 
-    let terminal_family = family_row("Terminal yazi tipi", &settings.borrow().appearance.terminal_font, {
+    let terminal_family = family_row("Terminal font", &settings.borrow().appearance.terminal_font, {
         let settings = Rc::clone(&settings);
         let apply = Rc::clone(&apply);
         move |name| {
@@ -108,7 +108,7 @@ where
         }
     });
 
-    let terminal_size = size_row("Terminal boyutu", settings.borrow().appearance.terminal_size, {
+    let terminal_size = size_row("Terminal size", settings.borrow().appearance.terminal_size, {
         let settings = Rc::clone(&settings);
         let apply = Rc::clone(&apply);
         move |value| {
@@ -127,7 +127,7 @@ where
     fonts.add(&terminal_size);
 
     let reset = adw::PreferencesGroup::new();
-    let button = gtk::Button::with_label("Varsayilanlara don");
+    let button = gtk::Button::with_label("Reset to defaults");
     button.add_css_class("pill");
     button.set_halign(gtk::Align::Center);
     {
@@ -142,7 +142,7 @@ where
             {
                 let mut settings = settings.borrow_mut();
                 settings.appearance = Default::default();
-                // Tema ayri bir tercih; font sifirlamasi onu bozmasin.
+                // The theme is a separate preference; resetting fonts must not touch it.
                 settings.appearance.theme = theme;
                 settings.save();
             }
@@ -173,7 +173,7 @@ where
 
     let button = gtk::FontDialogButton::new(Some(gtk::FontDialog::new()));
     button.set_valign(gtk::Align::Center);
-    // Once tanim, sonra seviye: ters sirada dugme "None" gosteriyordu.
+    // Description first, then level: the other order made the button read "None".
     button.set_font_desc(&family_desc(initial));
     button.set_level(gtk::FontLevel::Family);
     button.set_use_size(false);
@@ -200,7 +200,7 @@ where
     row
 }
 
-/// Aile adindan gecerli bir tanim: bos ise temanin varsayilani.
+/// A valid description from a family name; empty falls back to the theme's.
 fn family_desc(name: &str) -> pango::FontDescription {
     let name = name.trim();
     let text = if name.is_empty() { "Sans 12".to_string() } else { format!("{name} 12") };
@@ -218,7 +218,7 @@ fn set_family(row: &adw::ActionRow, name: &str) {
     }
 }
 
-/// ActionRow suffix'i birkac kutu derinde kalabiliyor.
+/// An ActionRow suffix can sit a few boxes deep.
 fn find_button(widget: &gtk::Widget) -> Option<gtk::FontDialogButton> {
     if let Ok(button) = widget.clone().downcast::<gtk::FontDialogButton>() {
         return Some(button);

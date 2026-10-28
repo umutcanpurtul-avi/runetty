@@ -10,17 +10,17 @@ use gtk::{gio, glib};
 use config::{APP_ID, MIN_ADW, MIN_GTK, RESOURCE_PATH, VERSION};
 
 fn main() -> glib::ExitCode {
-    // ssh'in SSH_ASKPASS'i olarak cagrildik: parolayi keyring'den okuyup bas.
-    // GTK baslatmadan once, cunku burada pencere yok.
+    // Invoked as ssh's SSH_ASKPASS: read the password from the keyring and
+    // print it. Before GTK starts, since there is no window here.
     if std::env::args().any(|arg| arg == "--askpass")
         || std::env::var_os("RUNETTY_ASKPASS_ALIAS").is_some()
     {
         return askpass();
     }
 
-    // Surum sorgulari ve kontrolu GTK baslatildiktan sonra guvenli.
+    // Version queries and checks are safe once GTK is initialised.
     if let Err(error) = gtk::init() {
-        eprintln!("runetty: GTK baslatilamadi: {error}");
+        eprintln!("runetty: could not initialise GTK: {error}");
         return glib::ExitCode::FAILURE;
     }
 
@@ -40,12 +40,12 @@ fn main() -> glib::ExitCode {
 
     if let Err(msg) = check_runtime_versions() {
         eprintln!("runetty: {msg}");
-        eprintln!("Cozum: dagitiminiz icin Flatpak surumunu kullanin (bkz. BUILDING.md).");
+        eprintln!("Fix: use the Flatpak build for your distribution (see BUILDING.md).");
         return glib::ExitCode::FAILURE;
     }
 
     gio::resources_register_include!("runetty.gresource")
-        .expect("gomulu kaynaklar yuklenemedi");
+        .expect("could not load embedded resources");
 
     let screenshot = argument_value("--screenshot");
     let exec = argument_value("--exec");
@@ -56,8 +56,8 @@ fn main() -> glib::ExitCode {
     let demo_metrics = std::env::args().any(|arg| arg == "--demo-metrics");
     let expand = argument_value("--expand");
 
-    // Gelistirme bayraklari acik bir pencere varken de ise yaramali;
-    // tek-instance davranisi bunlari calisan surece devredip yutuyor.
+    // Development flags must work even with a window already open; the
+    // single-instance behaviour would hand them to the running process.
     let flags = if screenshot.is_some()
         || exec.is_some()
         || autoconnect.is_some()
@@ -106,17 +106,17 @@ fn main() -> glib::ExitCode {
         }
     });
 
-    // Argumanlari kendimiz okuyoruz; GApplication'a bilinmeyen bayrak gitmesin.
+    // We parse arguments ourselves; GApplication must not see unknown flags.
     app.run_with_args::<&str>(&[])
 }
 
-/// Dinamik bagladigimiz icin surum uyusmazligi calistirma aninda ortaya cikar.
-/// Anlasilir bir mesajla cikmak, cozulmemis sembol hatasindan iyidir.
+/// We link dynamically, so a version mismatch surfaces at run time.
+/// Exiting with a clear message beats an unresolved-symbol error.
 fn check_runtime_versions() -> Result<(), String> {
     let gtk = (gtk::major_version(), gtk::minor_version());
     if gtk < MIN_GTK {
         return Err(format!(
-            "GTK {}.{} gerekiyor, sistemde {}.{} var.",
+            "GTK {}.{} is required, the system has {}.{}.",
             MIN_GTK.0, MIN_GTK.1, gtk.0, gtk.1
         ));
     }
@@ -124,7 +124,7 @@ fn check_runtime_versions() -> Result<(), String> {
     let adw = (adw::major_version(), adw::minor_version());
     if adw < MIN_ADW {
         return Err(format!(
-            "libadwaita {}.{} gerekiyor, sistemde {}.{} var.",
+            "libadwaita {}.{} is required, the system has {}.{}.",
             MIN_ADW.0, MIN_ADW.1, adw.0, adw.1
         ));
     }
@@ -132,7 +132,7 @@ fn check_runtime_versions() -> Result<(), String> {
     Ok(())
 }
 
-/// SSH_ASKPASS protokolu: parolayi stdout'a bas, baska hicbir sey yazma.
+/// The SSH_ASKPASS protocol: print the password to stdout and nothing else.
 fn askpass() -> glib::ExitCode {
     let Ok(alias) = std::env::var("RUNETTY_ASKPASS_ALIAS") else {
         return glib::ExitCode::FAILURE;
@@ -147,7 +147,7 @@ fn askpass() -> glib::ExitCode {
     }
 }
 
-/// `--bayrak deger` seklindeki argumani okur.
+/// Reads an argument of the form `--flag value`.
 fn argument_value(flag: &str) -> Option<String> {
     let mut args = std::env::args();
     while let Some(arg) = args.next() {
@@ -159,17 +159,17 @@ fn argument_value(flag: &str) -> Option<String> {
 }
 
 thread_local! {
-    /// Acik palet. style.css koyu paleti tutuyor; bu saglayici yalnizca
-    /// acik temada ekleniyor ve renkleri yeniden tanimliyor.
+    /// Light palette. style.css holds the dark one; this provider is added
+    /// only for the light theme and redefines the colours.
     static LIGHT_CSS: gtk::CssProvider = gtk::CssProvider::new();
 
-    /// Ayarlardan gelen font katmani. Paletin de ustunde duruyor,
-    /// boylece tasarim tokenlari dosyada kalirken tercih ezebiliyor.
+    /// Font layer from the settings. It sits above the palette, so design
+    /// tokens stay in the file while preferences can still override them.
     static USER_CSS: gtk::CssProvider = gtk::CssProvider::new();
 }
 
-/// Acik paleti ekler ya da kaldirir. libadwaita'nin `dark` durumunu
-/// izleyen taraf cagirir; burada yalnizca saglayici yonetiliyor.
+/// Adds or removes the light palette. The caller watches libadwaita's `dark`
+/// state; this only manages the provider.
 pub fn apply_palette(dark: bool) {
     let Some(display) = gtk::gdk::Display::default() else {
         return;
@@ -195,7 +195,7 @@ pub fn apply_user_css(css: &str) {
         provider.load_from_string(css);
 
         if let Some(display) = gtk::gdk::Display::default() {
-            // Paletin de ustunde: font tercihi her iki temada da gecerli.
+            // Above the palette: the font preference holds in both themes.
             gtk::style_context_add_provider_for_display(
                 &display,
                 provider,
@@ -216,7 +216,7 @@ fn load_stylesheet() {
     );
 }
 
-/// Kendi symbolic ikonlarimiz gresource'tan gelir; Adwaita seti yedek kalir.
+/// Our own symbolic icons come from gresource; the Adwaita set is the fallback.
 fn register_icons() {
     let display = gtk::gdk::Display::default().expect("ekran bulunamadi");
     gtk::IconTheme::for_display(&display)

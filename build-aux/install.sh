@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Yerel derlemeyi sisteme kurar. PREFIX=~/.local ya da PREFIX=/usr/local.
+# Installs a native build. PREFIX=~/.local or PREFIX=/usr/local.
 set -euo pipefail
 
 PREFIX=${PREFIX:-$HOME/.local}
 root=$(cd "$(dirname "$0")/.." && pwd)
 
 [ -x "$root/target/release/runetty" ] || {
-  echo "once: cargo build --release" >&2; exit 1;
+  echo "run first: cargo build --release" >&2; exit 1;
 }
 
 install -Dm755 "$root/target/release/runetty" "$PREFIX/bin/runetty"
@@ -22,4 +22,4 @@ command -v gtk-update-icon-cache >/dev/null &&
 command -v update-desktop-database >/dev/null &&
   update-desktop-database -q "$PREFIX/share/applications" 2>/dev/null || true
 
-echo "kuruldu: $PREFIX/bin/runetty"
+echo "installed: $PREFIX/bin/runetty"

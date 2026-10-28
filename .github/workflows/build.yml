@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  # Taban ve ustu: yerel derlemenin desteklendigi dagitimlar.
+  # Floor and above: distributions where a native build is supported.
   native:
     runs-on: ubuntu-latest
     strategy:
@@ -22,7 +22,7 @@ jobs:
     container: ${{ matrix.image }}
     name: native (${{ matrix.name }})
     steps:
-      - name: Checkout araclarini kur
+      - name: Install checkout tools
         run: |
           set -eux
           if command -v pacman >/dev/null; then
@@ -31,14 +31,14 @@ jobs:
             apt-get update && apt-get install -y --no-install-recommends git ca-certificates sudo
           fi
       - uses: actions/checkout@v4
-      - name: Bagimliliklar
+      - name: Dependencies
         run: ./build-aux/install-deps.sh
-      - name: Derle
+      - name: Build
         run: cargo build --release --locked
-      - name: Terminalsiz derleme
+      - name: Build without terminal
         run: cargo build --release --locked --no-default-features
 
-  # Taban altindaki dagitimlar Flatpak ile kapsaniyor.
+  # Distributions below the floor are covered by Flatpak.
   flatpak:
     runs-on: ubuntu-latest
     container:
@@ -46,7 +46,7 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v4
-      - name: cargo-sources.json uret
+      - name: Generate cargo-sources.json
         run: |
           set -eux
           python3 -m pip install --break-system-packages aiohttp toml tomlkit ||

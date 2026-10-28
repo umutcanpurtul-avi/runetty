@@ -1,12 +1,12 @@
-//! Sunucu metriklerinin toplanmasi ve ayristirilmasi.
+//! Collecting and parsing host metrics.
 //!
-//! Maliyet buradaki tek gercek risk: 10 sunucu x 2 saniye, her turda yeni bir
-//! SSH el sikismasi demek olurdu. Bunun yerine `ControlMaster` ile sunucu
-//! basina tek kalici kanal aciliyor; sonraki her turda ayni kanal kullaniliyor,
-//! yani maliyet bir komut calistirmaya iniyor.
+//! Cost is the one real risk here: ten hosts every two seconds would mean a
+//! fresh SSH handshake per round. Instead `ControlMaster` opens one persistent
+//! channel per host and every later round reuses it, so the cost drops to
+//! running a single command.
 
-/// Tek turda uzak tarafta calisan komut. Bolum basliklari ayristirmayi
-/// sabit tutuyor: cikti bicimi degisen araclara (top, vmstat) guvenmiyoruz.
+/// The command run remotely in one round. Section headers keep parsing
+/// stable: we avoid tools whose output format shifts (top, vmstat).
 pub const PROBE: &str = "\
 printf 'STAT\\n'; head -1 /proc/stat; \
 printf 'MEM\\n'; grep -E '^(MemTotal|MemAvailable):' /proc/meminfo; \
@@ -14,7 +14,7 @@ printf 'UP\\n'; cut -d' ' -f1 /proc/uptime; \
 printf 'CPUS\\n'; nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo; \
 printf 'DISK\\n'; df -P / | tail -1";
 
-/// CPU zamanlayici sayaclari. Yuzde, iki olcum arasindaki farktan cikiyor.
+/// CPU scheduler counters. The percentage comes from the delta between two samples.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CpuTimes {
     pub total: u64,
@@ -58,7 +58,7 @@ impl Sample {
         }
     }
 
-    /// Kart altligindaki ozet satiri: "up 5d 13:52 · 4c · 5.8 GB"
+    /// Summary line at the foot of a card: "up 5d 13:52 · 4c · 5.8 GB"
     pub fn summary(&self) -> String {
         format!(
             "{} · {}c · {:.1} GB",
@@ -69,8 +69,8 @@ impl Sample {
     }
 }
 
-/// Iki olcum arasindaki CPU kullanimi. Ilk turda onceki olcum olmadigi icin
-/// `None` doner — sifir gostermek yaniltici olurdu.
+/// CPU usage between two samples. The first round has no previous sample, so
+/// it returns `None`; showing zero would be misleading.
 pub fn cpu_percent(previous: Option<CpuTimes>, current: CpuTimes) -> Option<f64> {
     let previous = previous?;
 
@@ -100,9 +100,9 @@ pub fn parse(output: &str) -> Option<Sample> {
             continue;
         }
 
-        // Butun bolum adlari tek yerden taniniyor. Detay ciktisindaki
-        // ek bolumler (LOAD, NET, PROCS) burada taninmayinca onceki bolumun
-        // icinde sayiliyordu ve ornegin cekirdek sayisi sifirlaniyordu.
+        // All section names are recognised in one place. When the extra
+        // detail sections (LOAD, NET, PROCS) were not, they counted as part of
+        // the previous section and zeroed out things like the core count.
         if let Some(name) = section_name(line) {
             section = name;
             continue;
@@ -159,23 +159,23 @@ fn parse_cpu(line: &str) -> Option<CpuTimes> {
         return None;
     }
 
-    // idle + iowait: ikisi de "is yapilmiyor" demek.
+    // idle + iowait: both mean "no work being done".
     let idle = values[3] + values.get(4).copied().unwrap_or(0);
     Some(CpuTimes { total: values.iter().sum(), idle })
 }
 
-/// Olcum komutunu kalici kanal uzerinden calistiran `ssh` argumanlari.
+/// `ssh` arguments that run the probe over the persistent channel.
 ///
-/// Terminal oturumuyla ayni `ControlPath`: bir sekme aciksa olcum o kanaldan
-/// gecer ve hicbir kimlik dogrulama yapilmaz. Kanal yoksa parola keyring'den
-/// SSH_ASKPASS ile verilir — `BatchMode` bilerek kapali, cunku acikken
-/// kaydedilmis parola da kullanilamiyordu.
+/// Same `ControlPath` as terminal sessions: with a tab open the probe rides
+/// that channel and authenticates not at all. Without one, the password comes
+/// from the keyring via SSH_ASKPASS - `BatchMode` is deliberately off, since
+/// with it even a saved password could not be used.
 pub fn probe_args(host: &super::Host) -> Vec<String> {
     let mut args = host.ssh_args();
     let target = args.pop().unwrap_or_default();
 
-    // Bilinmeyen sunucuyu arka planda sessizce kabul etmek istemiyoruz;
-    // guven karari kendi diyalogumuzda veriliyor.
+    // We do not want to silently accept an unknown host in the background;
+    // that decision is made in our own dialog.
     args.push("-o".into());
     args.push("StrictHostKeyChecking=yes".into());
     args.push("-o".into());
@@ -209,7 +209,7 @@ DISK
 
     #[test]
     fn parses_probe_output() {
-        let sample = parse(OUTPUT).expect("ayristirilabilmeli");
+        let sample = parse(OUTPUT).expect("should parse");
 
         assert_eq!(sample.cpu.total, 1000);
         assert_eq!(sample.cpu.idle, 850);
@@ -226,7 +226,7 @@ DISK
         assert_eq!(sample.summary(), "up 5d 10:33 · 4c · 7.6 GB");
     }
 
-    /// Ilk turda onceki olcum yok: sifir gostermek yerine deger yok.
+    /// No previous sample on the first round: no value rather than zero.
     #[test]
     fn cpu_needs_two_samples() {
         let current = CpuTimes { total: 1000, idle: 850 };
@@ -237,7 +237,7 @@ DISK
         assert!((percent - 50.0).abs() < 0.01, "got {percent}");
     }
 
-    /// Sunucu yeniden baslayinca sayaclar sifirlanir; eksi fark cikmamali.
+    /// Counters reset when a host reboots; the delta must not go negative.
     #[test]
     fn counter_reset_is_not_a_negative_percentage() {
         let previous = CpuTimes { total: 5000, idle: 4000 };
@@ -246,8 +246,8 @@ DISK
     }
 }
 
-/// Detay sayfasinin olcumu. Kart olcumunun ustune disk listesi, ag sayaclari
-/// ve en yuklu surecleri ekliyor; yine tek komut, yine ayni kalici kanal.
+/// The detail probe. It adds disk list, network counters and the busiest
+/// processes on top of the card probe; still one command, still one channel.
 pub const DETAIL_PROBE: &str = "\
 printf 'STAT\\n'; head -1 /proc/stat; \
 printf 'MEM\\n'; grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo; \
@@ -340,8 +340,8 @@ pub fn parse_detail(output: &str) -> Option<Detail> {
                 }
             }
             "disks" => {
-                // Bind mount'lar ayni dosya sistemini defalarca gosteriyor;
-                // ilk goruldugu baglanti noktasi yeterli.
+                // Bind mounts show the same filesystem many times over;
+                // the first mount point seen is enough.
                 if let Some(disk) = parse_disk(line) {
                     if !disks.iter().any(|seen: &Disk| seen.device == disk.device) {
                         disks.push(disk);
@@ -380,7 +380,7 @@ fn section_name(line: &str) -> Option<&'static str> {
         "UP" => Some("up"),
         "CPUS" => Some("cpus"),
         "LOAD" => Some("load"),
-        // Kart olcumu tekil, detay olcumu cogul basligi kullaniyor.
+        // The card probe uses the singular header, the detail probe the plural.
         "DISK" => Some("disk"),
         "DISKS" => Some("disks"),
         "NET" => Some("net"),
@@ -404,7 +404,7 @@ fn parse_disk(line: &str) -> Option<Disk> {
         total_kb: fields[1].parse().ok()?,
         used_kb: fields[2].parse().ok()?,
         used_percent: fields[4].trim_end_matches('%').parse().ok()?,
-        // Bagli dizin bosluk icerebilir; kalan alanlari geri birlestir.
+        // A mount point may contain spaces; rejoin the remaining fields.
         mount: fields[5..].join(" "),
     })
 }
@@ -417,7 +417,7 @@ fn parse_interface(line: &str) -> Option<Interface> {
     }
 
     let values: Vec<&str> = rest.split_whitespace().collect();
-    // /proc/net/dev: rx 8 sutun, sonra tx 8 sutun.
+    // /proc/net/dev: eight rx columns, then eight tx columns.
     Some(Interface {
         name: name.to_string(),
         rx_bytes: values.first()?.parse().ok()?,
@@ -499,8 +499,8 @@ PROCS
   4.0  1.1  2345 sshd
 ";
 
-    /// LOAD, NET, PROCS bolumleri eskiden taninmiyor ve bir onceki bolumun
-    /// icinde sayiliyordu; cekirdek sayisi boylece sifirlaniyordu.
+    /// LOAD, NET and PROCS used to be unrecognised and counted as part of the
+    /// previous section, which zeroed out the core count.
     #[test]
     fn extra_sections_do_not_clobber_earlier_ones() {
         let detail = parse_detail(OUTPUT).unwrap();
@@ -516,12 +516,12 @@ PROCS
         );
 
         let detail = parse_detail(&text).unwrap();
-        assert_eq!(detail.disks.len(), 2, "bind mount tekrar listelenmemeli");
+        assert_eq!(detail.disks.len(), 2, "a bind mount must not be listed twice");
     }
 
     #[test]
     fn parses_detail_sections() {
-        let detail = parse_detail(OUTPUT).expect("ayristirilabilmeli");
+        let detail = parse_detail(OUTPUT).expect("should parse");
 
         assert_eq!(detail.load, [0.52, 0.71, 0.93]);
         assert!((detail.swap_percent() - 25.0).abs() < 0.01);
@@ -530,7 +530,7 @@ PROCS
         assert_eq!(detail.disks[0].mount, "/");
         assert_eq!(detail.disks[1].used_percent, 2.0);
 
-        assert_eq!(detail.interfaces.len(), 1, "lo listelenmemeli");
+        assert_eq!(detail.interfaces.len(), 1, "lo must not be listed");
         assert_eq!(detail.interfaces[0].name, "eth0");
         assert_eq!(detail.interfaces[0].rx_bytes, 1_024_000);
         assert_eq!(detail.interfaces[0].tx_bytes, 2_048_000);
@@ -540,7 +540,7 @@ PROCS
         assert_eq!(detail.processes[0].pid, 1234);
     }
 
-    /// Bagli dizin bosluk icerebiliyor; sutun birlestirme bozulmamali.
+    /// A mount point may contain spaces; column rejoining must hold.
     #[test]
     fn mount_point_with_space_is_kept_whole() {
         let detail = parse_detail(OUTPUT).unwrap();

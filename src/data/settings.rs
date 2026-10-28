@@ -1,6 +1,6 @@
-//! Gorunum tercihleri: `~/.config/runetty/settings.toml`.
-//! Sunucu kayitlarindan ayri duruyor cunku biri paylasilabilir yapilandirma,
-//! digeri tamamen bu makineye ait zevk meselesi.
+//! Appearance preferences: `~/.config/runetty/settings.toml`.
+//! Kept apart from server records: one is shareable configuration, the other
+//! is a matter of taste belonging to this machine alone.
 
 use std::path::PathBuf;
 
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
-    /// Masaustunun karar vermesine birak.
+    /// Let the desktop decide.
     #[default]
     System,
     Light,
@@ -23,14 +23,14 @@ impl Theme {
 
     pub fn label(self) -> &'static str {
         match self {
-            Theme::System => "Sistem",
-            Theme::Light => "Acik",
-            Theme::Dark => "Koyu",
+            Theme::System => "System",
+            Theme::Light => "Light",
+            Theme::Dark => "Dark",
         }
     }
 }
 
-/// Bos birakilan alan "temanin kendi secimi" demek.
+/// An empty field means "whatever the theme picks".
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Appearance {
@@ -43,9 +43,9 @@ pub struct Appearance {
 
 impl Default for Appearance {
     fn default() -> Self {
-        // Aile bos: style.css'teki yedek zinciri gecerli kalsin.
-        // Inter kurulu degilse zincir zaten bir sonrakine dusuyor; buraya
-        // sabit bir ad yazmak, kurulu olmayan fontu dayatmak olurdu.
+        // Family left empty so the fallback chain in style.css stays in force.
+        // If Inter is not installed the chain already moves on; hardcoding a
+        // name here would impose a font that may not exist.
         Self {
             theme: Theme::default(),
             interface_font: String::new(),
@@ -57,7 +57,7 @@ impl Default for Appearance {
 }
 
 impl Appearance {
-    /// Pango tanimi: "Inter 13". Bos aile temanin fontuna birakir.
+    /// Pango description, e.g. "Inter 13". An empty family defers to the theme.
     pub fn interface_pango(&self) -> String {
         format!("{} {}", self.family(&self.interface_font, "sans"), self.interface_size)
     }
@@ -75,9 +75,9 @@ impl Appearance {
         }
     }
 
-    /// style.css'teki sabitleri ezen kucuk bir katman.
-    /// Aile bos birakildiysa o kurali hic yazmiyoruz: stylesheet'teki
-    /// yedek zinciri (Inter -> Adwaita Sans -> Cantarell) bozulmasin.
+    /// A thin layer over the constants in style.css.
+    /// When the family is empty we omit the rule entirely so the stylesheet's
+    /// fallback chain (Inter -> Adwaita Sans -> Cantarell) stays intact.
     pub fn css(&self) -> String {
         let mut css = String::new();
 
@@ -102,16 +102,16 @@ impl Appearance {
     }
 }
 
-/// Aile adi bosluk iceriyorsa tirnakla; yedek zinciri koru.
+/// Quote the family name if it contains spaces; keep the fallback chain.
 fn quote_family(value: &str) -> String {
     format!("\"{}\", \"Adwaita Sans\", Cantarell, sans-serif", value.trim().replace('"', ""))
 }
 
-/// Pencere yerlesimi: oturumlar arasinda korunan tercihler.
+/// Window layout: preferences preserved across sessions.
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Layout {
-    /// Monitor sagda sabit panelde mi duruyor?
+    /// Is Monitor pinned to the right-hand pane?
     pub monitor_pinned: bool,
 }
 
@@ -130,7 +130,7 @@ impl Settings {
         };
 
         toml::from_str(&text).unwrap_or_else(|error| {
-            eprintln!("runetty: settings.toml okunamadi: {error}");
+            eprintln!("runetty: could not read settings.toml: {error}");
             Self::default()
         })
     }
@@ -140,7 +140,7 @@ impl Settings {
 
         if let Some(parent) = path.parent() {
             if let Err(error) = std::fs::create_dir_all(parent) {
-                eprintln!("runetty: {} olusturulamadi: {error}", parent.display());
+                eprintln!("runetty: could not create {}: {error}", parent.display());
                 return;
             }
         }
@@ -151,10 +151,10 @@ impl Settings {
                 if let Err(error) = std::fs::write(&temporary, text)
                     .and_then(|()| std::fs::rename(&temporary, &path))
                 {
-                    eprintln!("runetty: settings.toml yazilamadi: {error}");
+                    eprintln!("runetty: could not write settings.toml: {error}");
                 }
             }
-            Err(error) => eprintln!("runetty: settings.toml serilestirilemedi: {error}"),
+            Err(error) => eprintln!("runetty: could not serialise settings.toml: {error}"),
         }
     }
 }

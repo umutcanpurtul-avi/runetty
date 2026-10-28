@@ -1,24 +1,23 @@
-//! Ilk baglantida host anahtari dogrulamasi.
+//! Host key verification on first connect.
 //!
-//! `SSH_ASKPASS_REQUIRE=force` verdigimiz icin OpenSSH "bu sunucuya
-//! guveniyor musun?" sorusunu da askpass'e yonlendiriyor; bizim askpass
-//! parola donduruyor, dolayisiyla soru kullaniciya hic ulasmiyordu.
+//! Because we set `SSH_ASKPASS_REQUIRE=force`, OpenSSH also routes the
+//! "do you trust this host?" question to askpass; ours returns a password,
+//! so the question never reached the user at all.
 //!
-//! Cozum soruyu uygulamanin kendi diyalogu yapmak: anahtari `ssh-keyscan`
-//! ile aliyoruz, parmak izini kullaniciya gosteriyoruz, onay verirse
-//! `known_hosts`'a yaziyoruz. Otomatik kabul etmiyoruz — guven karari
-//! kullanicinin.
+//! The fix is to ask it ourselves: fetch the key with `ssh-keyscan`, show the
+//! fingerprint, and write it to `known_hosts` only on approval. We never
+//! accept automatically - trust is the user's call.
 
 use std::path::PathBuf;
 use std::process::Stdio;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Known {
-    /// known_hosts'ta kayitli; dogrudan baglanilabilir.
+    /// Recorded in known_hosts; safe to connect straight away.
     Yes,
-    /// Hic gorulmemis; onay gerekiyor.
+    /// Never seen; needs approval.
     No,
-    /// Karar verilemedi (ssh-keygen yok vb.) — ssh'in kendi akisina birak.
+    /// Undecidable (no ssh-keygen, etc.); leave it to ssh's own flow.
     Unclear,
 }
 
@@ -26,7 +25,7 @@ pub fn known_hosts() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(".ssh/known_hosts"))
 }
 
-/// `[host]:port` — ssh'in standart gosterimi.
+/// `[host]:port` - ssh's standard notation.
 fn lookup_name(host: &str, port: u16) -> String {
     if port == 22 {
         host.to_string()
@@ -60,7 +59,7 @@ pub fn status(host: &str, port: u16) -> Known {
     }
 }
 
-/// `ssh-keyscan` ciktisi: her satir bir anahtar.
+/// `ssh-keyscan` output: one key per line.
 pub fn scan(host: &str, port: u16) -> Result<Vec<String>, String> {
     let output = std::process::Command::new("ssh-keyscan")
         .arg("-T")
@@ -71,7 +70,7 @@ pub fn scan(host: &str, port: u16) -> Result<Vec<String>, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .map_err(|error| format!("ssh-keyscan calistirilamadi: {error}"))?;
+        .map_err(|error| format!("could not run ssh-keyscan: {error}"))?;
 
     let keys: Vec<String> = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -84,7 +83,7 @@ pub fn scan(host: &str, port: u16) -> Result<Vec<String>, String> {
         let reason = String::from_utf8_lossy(&output.stderr)
             .lines()
             .next_back()
-            .unwrap_or("sunucudan anahtar alinamadi")
+            .unwrap_or("no key returned by the host")
             .trim()
             .to_string();
         return Err(reason);
@@ -93,7 +92,7 @@ pub fn scan(host: &str, port: u16) -> Result<Vec<String>, String> {
     Ok(keys)
 }
 
-/// Kullaniciya gosterilecek parmak izleri: ("ED25519", "SHA256:...").
+/// Fingerprints to show the user: ("ED25519", "SHA256:...").
 pub fn fingerprints(keys: &[String]) -> Vec<(String, String)> {
     use std::io::Write;
 
@@ -135,9 +134,9 @@ pub fn fingerprints(keys: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Anahtarlari known_hosts'a ekler. Dosyayi yeniden yazmaz, sadece ekler.
+/// Appends keys to known_hosts. Never rewrites the file, only appends.
 pub fn trust(keys: &[String]) -> Result<(), String> {
-    let path = known_hosts().ok_or_else(|| "~/.ssh bulunamadi".to_string())?;
+    let path = known_hosts().ok_or_else(|| "~/.ssh not found".to_string())?;
     trust_into(&path, keys)
 }
 
@@ -146,18 +145,18 @@ fn trust_into(path: &std::path::Path, keys: &[String]) -> Result<(), String> {
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|error| format!("{} olusturulamadi: {error}", parent.display()))?;
+            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
     }
 
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
-        .map_err(|error| format!("known_hosts acilamadi: {error}"))?;
+        .map_err(|error| format!("could not open known_hosts: {error}"))?;
 
     for key in keys {
         writeln!(file, "{key}")
-            .map_err(|error| format!("known_hosts yazilamadi: {error}"))?;
+            .map_err(|error| format!("could not write known_hosts: {error}"))?;
     }
 
     Ok(())
@@ -173,7 +172,7 @@ mod tests {
         assert_eq!(lookup_name("10.0.0.1", 2222), "[10.0.0.1]:2222");
     }
 
-    /// Var olan kayitlarin uzerine yazmamali: dosya sadece buyumeli.
+    /// Must not overwrite existing entries: the file should only grow.
     #[test]
     fn trust_appends_without_touching_existing_entries() {
         let dir = std::env::temp_dir().join(format!("runetty-test-{}", std::process::id()));
@@ -184,8 +183,8 @@ mod tests {
         trust_into(&path, &["new.example ssh-ed25519 BBBB".to_string()]).unwrap();
 
         let contents = std::fs::read_to_string(&path).unwrap();
-        assert!(contents.contains("old.example"), "eski kayit korunmali");
-        assert!(contents.contains("new.example"), "yeni kayit eklenmeli");
+        assert!(contents.contains("old.example"), "existing entry must survive");
+        assert!(contents.contains("new.example"), "new entry must be appended");
         assert_eq!(contents.lines().count(), 2);
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -193,7 +192,7 @@ mod tests {
 
     #[test]
     fn reads_fingerprints_from_keyscan_lines() {
-        // ssh-keygen yoksa test anlamsiz; ortamda varsa gercek ciktiyi dogrula.
+        // Without ssh-keygen the test is moot; verify real output when present.
         if std::process::Command::new("ssh-keygen").arg("-?").output().is_err() {
             return;
         }

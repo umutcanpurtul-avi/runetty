@@ -1,9 +1,9 @@
-//! Parolalar sistem keyring'inde (Secret Service: GNOME Keyring / KWallet)
-//! tutulur. hosts.toml'a ya da baska bir dosyaya asla duz metin yazilmaz.
+//! Passwords live in the system keyring (Secret Service: GNOME Keyring or
+//! KWallet). They are never written in plain text to hosts.toml or anywhere else.
 //!
-//! Parolayi ssh'a verme yolu `SSH_ASKPASS`: ssh, parola sordugunda bu programi
-//! calistirip stdout'undan okur. Boylece `sshpass` gibi komut satirinda parola
-//! tasiyan bir araca ihtiyac kalmiyor.
+//! They reach ssh through `SSH_ASKPASS`: when ssh needs a password it runs this
+//! program and reads stdout. That avoids tools like `sshpass`, which carry the
+//! password on the command line.
 
 use libsecret::{Schema, SchemaAttributeType, SchemaFlags};
 use std::collections::HashMap;

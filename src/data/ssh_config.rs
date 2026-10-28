@@ -1,4 +1,4 @@
-//! `~/.ssh/config` okuyucu. Yalniz okur — bu dosyaya hicbir zaman yazmayiz.
+//! Reader for `~/.ssh/config`. Read-only: we never write to that file.
 
 use std::path::{Path, PathBuf};
 
@@ -13,7 +13,7 @@ pub fn load() -> Vec<Host> {
 }
 
 fn parse_file(path: &Path, depth: u8) -> Vec<Host> {
-    // Include donguleri ve derin zincirler icin sert bir sinir.
+    // A hard limit against include cycles and deep chains.
     if depth > 8 {
         return Vec::new();
     }
@@ -45,7 +45,7 @@ fn parse(text: &str, origin: &Path, depth: u8) -> Vec<Host> {
                 if let Some(host) = current.take() {
                     push(&mut hosts, host);
                 }
-                // `Host a b` ve joker desenler: ilk somut adi al, desenleri atla.
+                // `Host a b` and wildcards: take the first literal name, skip patterns.
                 let alias = value.split_whitespace().find(|p| !is_pattern(p));
                 current = alias.map(|alias| Host {
                     alias: alias.to_string(),
@@ -101,14 +101,14 @@ fn push(hosts: &mut Vec<Host>, mut host: Host) {
     if host.hostname.is_empty() {
         host.hostname = host.alias.clone();
     }
-    // Ayni alias birden fazla kez tanimliysa ilki kazanir (ssh'in davranisi).
+    // If an alias is defined more than once the first wins, as ssh does.
     if !hosts.iter().any(|existing| existing.alias == host.alias) {
         hosts.push(host);
     }
 }
 
 fn split_directive(line: &str) -> Option<(&str, &str)> {
-    // `Key value` ve `Key=value` ikisi de gecerli.
+    // Both `Key value` and `Key=value` are valid.
     let (key, rest) = match line.find(['=', ' ', '\t']) {
         Some(index) => (&line[..index], line[index + 1..].trim_start_matches(['=', ' ', '\t'])),
         None => return None,
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn reads_host_blocks() {
         let text = "\
-# yorum
+# comment
 Host edge
     HostName 10.10.10.21
     User root
@@ -189,8 +189,8 @@ Host nas
     fn alias_without_hostname_falls_back() {
         let hosts = parse("Host box\n  User u\n", Path::new("/tmp/config"), 0);
         assert_eq!(hosts[0].hostname, "box");
-        // Komut kalici kanal secenekleriyle birlikte uretiliyor; onemli
-        // olan hedefin alias olmasi, cunku digerlerini ssh config biliyor.
+        // The command carries the shared-channel options; what matters is that
+        // the target is the alias, because ssh config knows the rest.
         let command = hosts[0].command();
         assert!(command.ends_with(" box"), "got {command}");
         assert!(command.starts_with("ssh "));

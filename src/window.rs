@@ -1,6 +1,6 @@
-//! Pencere iskeleti: ikon rayi + OverlaySplitView + sekmeli icerik.
-//! Veri degisiklikleri tek bir `refresh` uzerinden kenar cubugu ve bos duruma
-//! birlikte yansir; iki yerde ayri durum tutmuyoruz.
+//! Window skeleton: icon rail, OverlaySplitView and tabbed content.
+//! Data changes reach both the sidebar and the empty state through a single
+//! `refresh`; we do not keep two separate copies of the state.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -42,7 +42,7 @@ pub fn build(
     crate::apply_user_css(&settings.borrow().appearance.css());
     apply_theme(settings.borrow().appearance.theme);
 
-    // Sistem temasi degisince ya da secim degisince palet takip etsin.
+    // Keep the palette in step with the system theme and with the choice.
     {
         let manager = adw::StyleManager::default();
         crate::apply_palette(manager.is_dark());
@@ -56,13 +56,13 @@ pub fn build(
         Rc::clone(&settings),
     );
 
-    // Ham komut: bos durumun komut alanindan gelir, bir kayda bagli degil.
+    // A raw command, typed in the empty state's field and tied to no record.
     let run: Rc<dyn Fn(&str)> = {
         let tabs = Rc::clone(&tabs);
         Rc::new(move |command: &str| tabs.open_or_focus(command, None))
     };
 
-    // Kayitli sunucu icin komutu uretip zaman damgasini gunceller.
+    // Builds the command for a stored host and updates its timestamp.
     let command_for: Rc<dyn Fn(&str) -> Option<String>> = {
         let store = Rc::clone(&store);
         Rc::new(move |alias: &str| {
@@ -73,8 +73,8 @@ pub fn build(
         })
     };
 
-    // Baglanmadan once host anahtarini dogrula. ssh'in terminaldeki sorusu
-    // askpass yuzunden kullaniciya ulasmiyor; soruyu biz soruyoruz.
+    // Verify the host key before connecting. ssh's terminal prompt never
+    // reaches the user because of askpass, so we ask instead.
     let guarded: Rc<dyn Fn(&str, Rc<dyn Fn()>)> = {
         let store = Rc::clone(&store);
         let window = window.clone();
@@ -91,7 +91,7 @@ pub fn build(
         })
     };
 
-    // Her zaman yeni sekme: Ctrl+tik, orta tik ve menudeki "New Session".
+    // Always a new tab: Ctrl-click, middle-click and "New Session" in the menu.
     let connect_new: Rc<dyn Fn(&str)> = {
         let command_for = Rc::clone(&command_for);
         let tabs = Rc::clone(&tabs);
@@ -113,7 +113,7 @@ pub fn build(
         })
     };
 
-    // Kayitli sunucu: zaman damgasi guncellenir, sonra komut calisir.
+    // Stored host: the timestamp is updated, then the command runs.
     let connect: Rc<dyn Fn(&str)> = {
         let command_for = Rc::clone(&command_for);
         let tabs = Rc::clone(&tabs);
@@ -123,7 +123,7 @@ pub fn build(
         REFRESH.with(|cell| *cell.borrow_mut() = Some(refresh_slot));
 
         Rc::new(move |alias: &str| {
-            // Acik oturum varsa anahtar zaten dogrulanmis; dogrudan odaklan.
+            // An open session means the key is already verified; just focus it.
             if tabs.focus(alias) {
                 return;
             }
@@ -173,9 +173,9 @@ pub fn build(
 
     let monitor = monitor::build(Rc::clone(&store));
 
-    // Sabitlenmis Monitor sagda kendi sutununda durur; sekmeler solda kalir.
-    // Paned, genisligi kullaniciya birakiyor: "ne cok buyuk ne cok kucuk"
-    // karari bir kez verilip dondurulmak yerine surukleyerek ayarlanabiliyor.
+    // A pinned Monitor sits in its own right-hand column; tabs stay on the
+    // left. Paned leaves the width to the user: rather than freezing one
+    // "not too wide, not too narrow" number, it can be dragged.
     let panes = gtk::Paned::new(gtk::Orientation::Horizontal);
     panes.set_start_child(Some(&content_stack));
     panes.set_resize_start_child(true);
@@ -190,10 +190,10 @@ pub fn build(
     split.set_min_sidebar_width(220.0);
     split.set_sidebar(Some(&sidebar.widget));
 
-    // Mod secici kenar cubugunun ust barinda: listenin tam ustunde,
-    // hangi listeye baktigin soldaki ayri bir raya bakmadan belli oluyor.
-    // Mod hem kenar cubugunu hem icerik alanini degistiriyor: Monitor kendi
-    // sayfasini aciyor, digerleri oturumlara geri donuyor.
+    // The mode switcher lives in the sidebar's top bar, directly above the
+    // list, so which list you are looking at is clear without a separate rail.
+    // The mode drives both the sidebar and the content area: Monitor opens its
+    // own page, the others return to sessions.
     let current_mode = Rc::new(Cell::new(mode));
 
     let rail = icon_rail::build(mode, {
@@ -209,7 +209,7 @@ pub fn build(
             current_mode.set(mode);
 
             if mode == icon_rail::Mode::Monitor {
-                // Sabitlenmisse panelde olmali; bir sekilde dusmusse geri koy.
+                // If pinned it belongs in the pane; put it back if it fell out.
                 if monitor.is_pinned() {
                     attach_pinned(&panes_for_rail, &monitor);
                     return;
@@ -241,7 +241,7 @@ pub fn build(
     app_menu.append(Some("New Folder"), Some("win.folder-new"));
     app_menu.append(Some("Reload ~/.ssh/config"), Some("win.reload-ssh-config"));
     app_menu.append(
-        Some("Gizlenen ssh config kayitlarini geri getir"),
+        Some("Restore hidden ssh config records"),
         Some("win.restore-hidden"),
     );
     app_menu.append(Some("About runetty"), Some("win.about"));
@@ -275,12 +275,12 @@ pub fn build(
     content_view.set_content(Some(&panes));
     split.set_content(Some(&content_view));
 
-    // Toast'lar icin tek bir katman; geri bildirim buradan geciyor.
+    // One layer for toasts; all feedback passes through here.
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&split));
     window.set_content(Some(&toasts));
 
-    // Klasor satirindaki + : kayit diyalogu o klasorde acilsin.
+    // The + on a folder row opens the record dialog inside that folder.
     {
         let window = window.clone();
         let store = Rc::clone(&store);
@@ -312,7 +312,7 @@ pub fn build(
         refresh: &refresh,
     });
 
-    // Son sekme kapaninca bos duruma geri don.
+    // Return to the empty state when the last tab closes.
     {
         let stack = content_stack.clone();
         tabs.view.connect_n_pages_notify(move |view| {
@@ -320,8 +320,8 @@ pub fn build(
         });
     }
 
-    // Monitor turu yalnizca kendi sekmesi secilikken calisir: arka plandaki
-    // bir sekmenin ag ve CPU yakmasi icin sebep yok.
+    // Monitor only runs while its own tab is selected: a background tab has no
+    // reason to burn network and CPU.
     {
         let monitor = Rc::clone(&monitor);
         let tabs_for_notify = Rc::clone(&tabs);
@@ -335,7 +335,7 @@ pub fn build(
         });
     }
 
-    // Sabitleme tercihi oturumlar arasinda korunuyor.
+    // The pin preference is kept across sessions.
     if settings.borrow().layout.monitor_pinned {
         monitor.set_pinned(true);
         let monitor = Rc::clone(&monitor);
@@ -360,11 +360,11 @@ pub fn build(
         tabs.open_or_focus(command, None);
     }
 
-    // Virgulle ayrilmis liste; `+` oneki ek oturum acar. Odaklanma ve
-    // coklu oturum davranisini tek komutla dogrulamak icin.
+    // Comma-separated list; a `+` prefix opens an extra session. Lets focus
+    // and multi-session behaviour be verified in one command.
     if let Some(aliases) = autoconnect.map(str::to_string) {
-        // Pencere sunulduktan sonra: diyaloglarin bir ust pencereye
-        // ihtiyaci var, yoksa sessizce gorunmuyorlar.
+        // After the window is presented: dialogs need a parent window or
+        // they silently fail to appear.
         let connect = Rc::clone(&connect);
         let connect_new = Rc::clone(&connect_new);
         glib::idle_add_local_once(move || {
@@ -377,7 +377,7 @@ pub fn build(
         });
     }
 
-    // Parametresiz bir pencere eylemini tetikler; dogrulama icin.
+    // Triggers a parameterless window action, for verification.
     if let Some(name) = action.map(str::to_string) {
         let window = window.clone();
         glib::idle_add_local_once(move || {
@@ -408,8 +408,8 @@ pub fn build(
     window
 }
 
-// `connect` ile `refresh` birbirine bagimli; biri digerinden once kuruluyor.
-// Dugumu tek bir gec-baglama noktasiyla cozuyoruz.
+// `connect` and `refresh` depend on each other and one is built first.
+// A single late-binding slot unties the knot.
 thread_local! {
     static REFRESH: RefCell<Option<Rc<RefCell<Option<Rc<dyn Fn()>>>>>> =
         const { RefCell::new(None) };
@@ -424,7 +424,7 @@ fn with_refresh<F: FnOnce(&Rc<dyn Fn()>)>(action: F) {
     }
 }
 
-/// Secimi libadwaita'ya bildirir; palet degisimi `dark` sinyaliyle geliyor.
+/// Tells libadwaita the choice; the palette change arrives via the `dark` signal.
 pub fn apply_theme(theme: Theme) {
     let scheme = match theme {
         Theme::System => adw::ColorScheme::Default,
@@ -456,16 +456,16 @@ fn tabs_page(tabs: &adw::TabView) -> gtk::Widget {
     page.upcast()
 }
 
-/// Sekme defteri. Hangi sunucunun hangi sekmede acik oldugunu bilir; ayni
-/// sunucuya tekrar tiklamak yeni sekme acmak yerine acik olana goturuyor.
+/// Tab ledger. It knows which host is open in which tab, so clicking a host
+/// again focuses the open tab instead of opening another.
 struct Tabs {
     view: adw::TabView,
     stack: gtk::Stack,
-    /// Alias -> acik sekmeleri. Ayni sunucuya birden fazla oturum
-    /// acilabiliyor; odaklanma en son acilana gider.
+    /// Alias to its open tabs. A host can have several sessions; focusing
+    /// goes to the most recently opened one.
     open: RefCell<HashMap<String, Vec<adw::TabPage>>>,
-    /// Monitor da bir sekme; terminal oturumlarinin yanina geliyor,
-    /// yerlerini almiyor.
+    /// Monitor is a tab too: it joins the terminal sessions rather than
+    /// replacing them.
     monitor_page: RefCell<Option<adw::TabPage>>,
     live: Rc<Sessions>,
     settings: Rc<RefCell<Settings>>,
@@ -488,7 +488,7 @@ impl Tabs {
         })
     }
 
-    /// Acik sekmelerin terminal fontunu yeni ayara gore tazeler.
+    /// Refreshes the terminal font of open tabs to match the new setting.
     #[cfg(feature = "terminal")]
     fn restyle(&self) {
         let font = self.settings.borrow().appearance.terminal_pango();
@@ -501,7 +501,7 @@ impl Tabs {
     #[cfg(not(feature = "terminal"))]
     fn restyle(&self) {}
 
-    /// Secili sekmeyi kapatip ayni sunucuya yeniden baglanir.
+    /// Closes the selected tab and reconnects to the same host.
     fn reconnect(self: &Rc<Self>, command_for: &Rc<dyn Fn(&str) -> Option<String>>) -> bool {
         let Some(page) = self.view.selected_page() else { return false };
 
@@ -525,8 +525,8 @@ impl Tabs {
         with_refresh(|refresh| refresh());
     }
 
-    /// Sabitlenirken sekmeyi kapatir; widget serbest kalsin ki panele
-    /// yeniden eklenebilsin.
+    /// Closes the tab when pinning, freeing the widget so it can be added to
+    /// the pane.
     fn close_monitor(&self) {
         let page = self.monitor_page.borrow_mut().take();
         if let Some(page) = page {
@@ -534,7 +534,7 @@ impl Tabs {
         }
     }
 
-    /// Monitor sekmesini acar ya da acik olana gecer.
+    /// Opens the Monitor tab, or switches to it if already open.
     fn open_monitor(self: &Rc<Self>, monitor: &Rc<monitor::Monitor>) {
         if let Some(page) = self.monitor_page.borrow().clone() {
             self.view.set_selected_page(&page);
@@ -545,9 +545,9 @@ impl Tabs {
         let page = self.view.append(&monitor.widget);
         page.set_title("Monitor");
 
-        // Defter secimden once yazilmali; ustelik ilk sayfa eklenirken
-        // TabView onu kendiliginden seciyor, yani secim sinyaline guvenip
-        // turu baslatmak yetmiyor — burada acikca baslatiyoruz.
+        // The ledger must be written before selection; moreover TabView selects
+        // the first page on its own, so relying on the selection signal to start
+        // rounds is not enough - we start them explicitly here.
         *self.monitor_page.borrow_mut() = Some(page.clone());
 
         self.view.set_selected_page(&page);
@@ -565,7 +565,7 @@ impl Tabs {
             if page != &closed {
                 return;
             }
-            // Sabitlenerek sekmeden cikariliyorsa tur devam etmeli.
+            // If it is leaving the tab to be pinned, rounds should continue.
             if !monitor.is_pinned() {
                 monitor.set_active(false);
             }
@@ -576,7 +576,7 @@ impl Tabs {
         }));
     }
 
-    /// Acik oturum varsa ona gecer ve `true` doner.
+    /// Focuses an open session if there is one and returns `true`.
     fn focus(&self, alias: &str) -> bool {
         let existing = self.open.borrow().get(alias).and_then(|p| p.last().cloned());
         let Some(page) = existing else { return false };
@@ -586,7 +586,7 @@ impl Tabs {
         true
     }
 
-    /// Acik oturum varsa ona gecer; yoksa yenisini acar.
+    /// Focuses an open session, or opens a new one.
     fn open_or_focus(self: &Rc<Self>, command: &str, alias: Option<&str>) {
         if let Some(alias) = alias {
             if self.focus(alias) {
@@ -609,8 +609,9 @@ impl Tabs {
         self.open.borrow_mut().entry(alias.to_string()).or_default().push(page.clone());
         self.mark(alias, sessions::State::Open);
 
-        // Sekme kapaninca kayit defterden dusuyor ve nokta kirmiziya doner.
-        // Sinyal bu sayfaya ozel, bu yuzden ilk tetiklenmede kendini soker.
+        // Closing the tab drops the record from the ledger and turns the dot
+        // red. The signal is specific to this page, so it disconnects itself
+        // the first time it fires.
         let this = Rc::clone(self);
         let alias = alias.to_string();
         let closed = page;
@@ -633,7 +634,7 @@ impl Tabs {
                 empty
             };
 
-            // Baska sekmesi duruyorsa sunucu hala bagli sayilir.
+            // With another tab still open the host counts as connected.
             if empty {
                 this.mark(&alias, sessions::State::Closed);
             }
@@ -652,7 +653,7 @@ impl Tabs {
 
         crate::ui::terminal::page(Some(command), alias, &font, move |status| {
             if let Some(alias) = &owned {
-                // Sekme hala acik ama komut bitti: baglanti dustu.
+                // The tab is still open but the command ended: connection dropped.
                 this.mark(
                     alias,
                     if status == 0 {
@@ -668,7 +669,7 @@ impl Tabs {
     #[cfg(not(feature = "terminal"))]
     fn terminal(self: &Rc<Self>, command: &str, _alias: Option<&str>) -> gtk::Widget {
         let label = gtk::Label::new(Some(&format!(
-            "Terminal destegi bu derlemede kapali.\n{command}"
+            "Terminal support is disabled in this build.\n{command}"
         )));
         label.add_css_class("dim");
         label.set_vexpand(true);
@@ -696,8 +697,8 @@ fn action_button(icon: &str, tooltip: &str, action: &str) -> gtk::Button {
     button
 }
 
-/// Eylem kurulumunun ihtiyaci olan parcalar. Ayri ayri parametre olarak
-/// tasimak imzayi okunmaz hale getiriyordu.
+/// The pieces action setup needs. Passing them as separate parameters made
+/// the signature unreadable.
 struct Wiring<'a> {
     window: &'a adw::ApplicationWindow,
     split: &'a adw::OverlaySplitView,
@@ -738,7 +739,7 @@ fn install_actions(w: Wiring) {
 
     let string = Some(glib::VariantTy::STRING);
 
-    // Sag tik menusu: alias eylemin hedefi olarak geliyor.
+    // Context menu: the alias arrives as the action's target.
     let host_connect = gio::SimpleAction::new("host-connect", string);
     {
         let connect = Rc::clone(w.connect);
@@ -778,9 +779,9 @@ fn install_actions(w: Wiring) {
             toast(
                 &window,
                 &if monitored {
-                    format!("\"{alias}\" Monitor'e eklendi")
+                    format!("\"{alias}\" added to Monitor")
                 } else {
-                    format!("\"{alias}\" Monitor'den cikarildi")
+                    format!("\"{alias}\" removed from Monitor")
                 },
             );
         });
@@ -844,7 +845,7 @@ fn install_actions(w: Wiring) {
         let window = window.clone();
         reconnect.connect_activate(move |_, _| {
             if !tabs.reconnect(&command_for) {
-                toast(&window, "Yeniden baglanacak bir oturum yok");
+                toast(&window, "No session to reconnect");
             }
         });
     }
@@ -885,13 +886,13 @@ fn install_actions(w: Wiring) {
         restore.connect_activate(move |_, _| {
             let count = store.borrow().hidden_count();
             if count == 0 {
-                toast(&window, "Gizlenmis kayit yok");
+                toast(&window, "No hidden records");
                 return;
             }
 
             store.borrow_mut().unhide_all();
             refresh();
-            toast(&window, &format!("{count} kayit geri getirildi"));
+            toast(&window, &format!("{count} records restored"));
         });
     }
     add(&restore);
@@ -927,14 +928,14 @@ fn install_actions(w: Wiring) {
                 settings.save();
             }
 
-            // Sira onemli: once sabit isaretle, sonra sekmeyi kapat.
-            // page-detached isleyicisi sabitlenmis Monitor'u durdurmasin.
+            // Order matters: mark it pinned first, then close the tab, so the
+            // page-detached handler does not stop a pinned Monitor.
             monitor.set_pinned(true);
             tabs.close_monitor();
 
-            // close_page widget'i hemen serbest birakmiyor; ayni karede
-            // panele eklemek "zaten bir ebeveyni var" hatasina dusuyor ve
-            // Monitor ekrandan tamamen kayboluyordu.
+            // close_page does not free the widget in the same frame; adding it
+            // to the pane right away hits "already has a parent" and Monitor
+            // vanished from the screen entirely.
             let monitor = Rc::clone(&monitor);
             let panes = panes.clone();
             glib::idle_add_local_once(move || {
@@ -949,8 +950,8 @@ fn install_actions(w: Wiring) {
     add(&palette);
 }
 
-/// Sabitlenmis Monitor'u sag sutuna yerlestirir. Idempotent: zaten
-/// oradaysa dokunmuyor, baska bir ebeveyni varsa once koparıyor.
+/// Places a pinned Monitor in the right-hand column. Idempotent: it leaves
+/// things alone if already there, and detaches any other parent first.
 fn attach_pinned(panes: &gtk::Paned, monitor: &Rc<monitor::Monitor>) {
     if panes.end_child().as_ref() == Some(&monitor.widget) {
         monitor.set_active(true);
@@ -966,7 +967,7 @@ fn attach_pinned(panes: &gtk::Paned, monitor: &Rc<monitor::Monitor>) {
         }
     }
 
-    // Hala bagliysa bu karede ekleyemeyiz; bir tur sonra tekrar dene.
+    // Still attached, so we cannot add it this frame; retry next tick.
     if monitor.widget.parent().is_some() {
         let panes = panes.clone();
         let monitor = Rc::clone(monitor);
@@ -976,8 +977,8 @@ fn attach_pinned(panes: &gtk::Paned, monitor: &Rc<monitor::Monitor>) {
 
     panes.set_end_child(Some(&monitor.widget));
 
-    // Varsayilan genislik: kartlar sigacak kadar genis, icerigi bogmayacak
-    // kadar dar. Kullanici tutamaktan surukleyerek degistirebiliyor.
+    // Default width: wide enough for the cards, narrow enough not to crowd the
+    // content. The user can drag the handle to change it.
     let width = panes.width();
     if width > 0 {
         panes.set_position(if width > 900 { width - 420 } else { width / 2 });
@@ -1000,8 +1001,8 @@ fn show_about(window: &adw::ApplicationWindow) {
     about.set_license_type(gtk::License::MitX11);
     about.set_website("https://github.com/umutcanpurtul-avi/runetty");
     about.set_comments(
-        "SSH oturumlari, agent'lar ve sunucu izleme icin tek pencere.\n\n\
-         Iletisim: purtulumut97@gmail.com",
+        "One window for SSH sessions, agents and host monitoring.\n\n\
+         Contact: purtulumut97@gmail.com",
     );
 
     about.present(Some(window));
@@ -1014,7 +1015,7 @@ fn toast(window: &adw::ApplicationWindow, text: &str) {
     }
 }
 
-/// Bos klasor olusturur; icine sunucu, kayit diyalogundan secilerek girer.
+/// Creates an empty folder; hosts move in by choosing it in the record dialog.
 fn new_folder(
     window: &adw::ApplicationWindow,
     store: Rc<RefCell<Store>>,
@@ -1041,7 +1042,7 @@ fn new_folder(
 
         let name = entry.text().trim().to_string();
         if name.is_empty() {
-            dialog.set_body("Klasor adi bos birakilamaz.");
+            dialog.set_body("The folder name cannot be empty.");
             return;
         }
 
@@ -1052,8 +1053,8 @@ fn new_folder(
     dialog.present(Some(window));
 }
 
-/// Silme geri alinamadigi icin onay sart; ssh config kaydinda ne oldugunu da
-/// acikca soyluyoruz — kullanicinin dosyasina dokunmuyoruz.
+/// Deletion cannot be undone, so it needs confirmation; for an ssh config
+/// record we also say plainly what happens - we do not touch the user's file.
 fn confirm_delete(
     window: &adw::ApplicationWindow,
     store: Rc<RefCell<Store>>,
@@ -1071,10 +1072,10 @@ fn confirm_delete(
 
     let body = match source {
         Some(Source::SshConfig) => format!(
-            "\"{alias}\" ~/.ssh/config icinde tanimli. runetty o dosyaya yazmaz; \
-             kayit yalnizca listeden gizlenir ve + menusunden geri getirilebilir."
+            "\"{alias}\" is defined in ~/.ssh/config. runetty never writes to that file; \
+             the record is only hidden and can be restored from the + menu."
         ),
-        _ => format!("\"{alias}\" kaydi silinsin mi? Bu islem geri alinamaz."),
+        _ => format!("Delete the record \"{alias}\"? This cannot be undone."),
     };
 
     let dialog = adw::AlertDialog::new(Some("Delete"), Some(&body));
@@ -1095,14 +1096,15 @@ fn confirm_delete(
         let deleted = store.borrow_mut().remove(&alias);
         refresh();
 
-        // Gizlenen kayit geri alinabilir; kullanici bunu menuden aramasin.
+        // A hidden record can be restored; the user should not have to hunt
+        // for that in a menu.
         if deleted {
-            toast(&parent, &format!("\"{alias}\" silindi"));
+            toast(&parent, &format!("\"{alias}\" deleted"));
             return;
         }
 
-        let toast = adw::Toast::new(&format!("\"{alias}\" listeden gizlendi"));
-        toast.set_button_label(Some("Geri al"));
+        let toast = adw::Toast::new(&format!("\"{alias}\" hidden from the list"));
+        toast.set_button_label(Some("Undo"));
         toast.set_action_name(Some("win.restore-hidden"));
         toast.set_timeout(6);
 

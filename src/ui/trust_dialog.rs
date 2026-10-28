@@ -1,12 +1,12 @@
-//! Ilk baglantida "bu sunucuya guveniyor musun?" diyalogu.
-//! ssh'in terminalde sordugu sorunun arayuz karsiligi.
+//! The "do you trust this host?" dialog shown on first connect.
+//! The UI counterpart of the question ssh asks in a terminal.
 
 use adw::prelude::*;
 
 use crate::data::hostkey;
 
-/// Anahtar bilinmiyorsa diyalogu gosterir ve kullanici guvenirse `proceed`
-/// calisir. Bilinen ya da karar verilemeyen durumda dogrudan `proceed`.
+/// Shows the dialog when the key is unknown and runs `proceed` on approval.
+/// Known or undecidable keys go straight to `proceed`.
 pub fn ensure_trusted<F>(
     parent: &impl IsA<gtk::Widget>,
     host: &str,
@@ -23,24 +23,24 @@ pub fn ensure_trusted<F>(
     let keys = match hostkey::scan(host, port) {
         Ok(keys) => keys,
         Err(reason) => {
-            // Anahtar alinamadi: ssh'in kendi akisina birak, hata orada gorunur.
-            eprintln!("runetty: {host} anahtari alinamadi: {reason}");
+            // No key available: leave it to ssh, whose error will show up there.
+            eprintln!("runetty: could not fetch key for {host}: {reason}");
             proceed();
             return;
         }
     };
 
     let dialog = adw::AlertDialog::new(
-        Some("Bilinmeyen sunucu"),
+        Some("Unknown host"),
         Some(&format!(
-            "{host} ile ilk kez baglaniyorsun. Parmak izini bekledigin \
-             degerle karsilastir; dogruysa guvenebilirsin."
+            "This is the first connection to {host}. Compare the fingerprint \
+             with the value you expect before trusting it."
         )),
     );
 
     dialog.set_extra_child(Some(&fingerprint_list(&keys)));
-    dialog.add_response("cancel", "Vazgec");
-    dialog.add_response("trust", "Guven ve baglan");
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("trust", "Trust and connect");
     dialog.set_response_appearance("trust", adw::ResponseAppearance::Suggested);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");
@@ -51,7 +51,7 @@ pub fn ensure_trusted<F>(
         }
 
         if let Err(error) = hostkey::trust(&keys) {
-            eprintln!("runetty: anahtar kaydedilemedi: {error}");
+            eprintln!("runetty: could not store key: {error}");
             return;
         }
 
@@ -63,13 +63,13 @@ pub fn ensure_trusted<F>(
 
 fn fingerprint_list(keys: &[String]) -> gtk::Widget {
     let group = adw::PreferencesGroup::new();
-    group.set_title("Parmak izi");
+    group.set_title("Fingerprint");
 
     let fingerprints = hostkey::fingerprints(keys);
     if fingerprints.is_empty() {
         let row = adw::ActionRow::new();
-        row.set_title("Parmak izi hesaplanamadi");
-        row.set_subtitle("ssh-keygen bulunamadi");
+        row.set_title("Could not compute fingerprint");
+        row.set_subtitle("ssh-keygen not found");
         group.add(&row);
         return group.upcast();
     }

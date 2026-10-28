@@ -1,5 +1,5 @@
-//! Bos durum: ortalanmis logo, genis komut alani, "Jump back in" cipleri,
-//! altta klavye ipucu satiri.
+//! Empty state: centred logo, wide command field, "Jump back in" chips and
+//! a keyboard hint row underneath.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -17,7 +17,7 @@ pub struct EmptyState {
 }
 
 impl EmptyState {
-    /// Son kullanilanlar degisince cipler de degisir.
+    /// Chips follow the recents list.
     pub fn refresh(&self) {
         while let Some(child) = self.chips.first_child() {
             self.chips.remove(&child);
@@ -71,7 +71,7 @@ pub fn build(
 
     let entry = gtk::Entry::new();
     entry.add_css_class("command-field");
-    entry.set_placeholder_text(Some("ssh user@host  ya da bir komut yazin"));
+    entry.set_placeholder_text(Some("ssh user@host  or type a command"));
     entry.set_margin_bottom(20);
     {
         let run = Rc::clone(&run);

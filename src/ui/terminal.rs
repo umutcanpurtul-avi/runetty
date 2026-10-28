@@ -1,11 +1,11 @@
-//! VTE tabanli terminal sayfasi.
-//! vte-2.91-gtk4 bulunmayan dagitimlarda `--no-default-features` ile devre disi.
+//! VTE-based terminal page.
+//! Disabled with `--no-default-features` on distributions without vte-2.91-gtk4.
 
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib, pango};
 use vte::prelude::*;
 
-/// Sarmalayicinin cikis kodunu bildirdigi baslik oneki.
+/// Title prefix the wrapper uses to report the exit status.
 const STATUS_PREFIX: &str = "runetty-status:";
 
 const PALETTE: [&str; 16] = [
@@ -15,9 +15,10 @@ const PALETTE: [&str; 16] = [
     "#7fa2ff", "#cbaaf7", "#8ae8e4", "#f5f6f8",
 ];
 
-/// `command` bos ise kullanicinin kabugu acilir.
-/// `alias` verilirse parola keyring'den SSH_ASKPASS uzerinden beslenir.
-/// `on_status` komut bitince cikis koduyla cagrilir; durum noktasi buna bakar.
+/// With no `command` the user's shell opens.
+/// Given an `alias`, the password is fed from the keyring via SSH_ASKPASS.
+/// `on_status` fires with the exit code when the command ends; the status dot
+/// reads from it.
 pub fn page<F>(
     command: Option<&str>,
     alias: Option<&str>,
@@ -44,18 +45,19 @@ where
         .unwrap_or_else(|| "/bin/bash".to_string());
 
     let argv: Vec<String> = match command {
-        // Komut bitince kullaniciyi sessizce yerel kabuga dusurmek yerine
-        // cikis kodunu goster ve sekmeyi acik tut.
-        // Cikis kodu pencere basligi uzerinden geri geliyor: sarmalayici
-        // `read` ile bekledigi icin surec olmuyor, yani child-exited yetmiyor.
+        // Rather than silently dropping the user into a local shell when the
+        // command ends, show the exit code and keep the tab open.
+        // The exit code comes back through the window title: the wrapper
+        // blocks on `read`, so the process never dies and child-exited alone
+        // is not enough.
         Some(cmd) => vec![
             "/bin/sh".into(),
             "-c".into(),
             format!(
                 "{cmd}; status=$?; \
                  printf '\\033]0;{STATUS_PREFIX}%s\\007' \"$status\"; \
-                 printf '\\n\\033[2m[runetty] cikis kodu %s — \
-                 kapatmak icin Enter\\033[0m\\n' \"$status\"; read _",
+                 printf '\\n\\033[2m[runetty] exit code %s — \
+                 press Enter to close\\033[0m\\n' \"$status\"; read _",
                 cmd = cmd
             ),
         ],
@@ -63,8 +65,8 @@ where
     };
     let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
 
-    // ssh parola sordugunda SSH_ASKPASS'i calistirir ve stdout'undan okur.
-    // Kendi binary'mizi askpass olarak veriyoruz; keyring'den okuyup basiyor.
+    // When ssh needs a password it runs SSH_ASKPASS and reads its stdout.
+    // We point that at our own binary, which prints what the keyring holds.
     let env: Vec<String> = match alias {
         Some(alias) if crate::data::secrets::has(alias) => match std::env::current_exe() {
             Ok(exe) => vec![
@@ -91,7 +93,7 @@ where
         None::<&gio::Cancellable>,
         |result| {
             if let Err(error) = result {
-                eprintln!("runetty: terminal baslatilamadi: {error}");
+                eprintln!("runetty: could not start terminal: {error}");
             }
         },
     );
@@ -115,7 +117,7 @@ where
     scroller.upcast()
 }
 
-/// Acik sekmelerin fontunu yerinde degistirir.
+/// Changes the font of open tabs in place.
 pub fn restyle(root: &gtk::Widget, font: &str) {
     if let Ok(term) = root.clone().downcast::<vte::Terminal>() {
         term.set_font(Some(&pango::FontDescription::from_string(font)));

@@ -1,6 +1,6 @@
-/* runetty tasarim sistemi
- * Tum gorsel kararlar burada. Rust tarafinda renk/olcu gecmez.
- * GTK 4.14 ile uyumlu sozdizimi: @define-color (var() 4.16+ oldugu icin kullanilmiyor).
+/* runetty design system
+ * Every visual decision lives here; no colour or measurement in Rust.
+ * GTK 4.14 compatible syntax: @define-color, since var() needs 4.16+.
  */
 
 @define-color bg_base        #0d0d12;
@@ -21,8 +21,8 @@
 @define-color state_done     #4ade80;
 @define-color state_idle     #6b7280;
 
-/* libadwaita'nin kendi tokenlari da ayni palete oturtuluyor; boylece
- * hazir widget'lar (PreferencesDialog, ActionRow, Toast) uyumlu kaliyor. */
+/* libadwaita's own tokens map onto the same palette so stock widgets
+ * (PreferencesDialog, ActionRow, Toast) stay consistent. */
 @define-color window_bg_color      @bg_base;
 @define-color window_fg_color      @fg_primary;
 @define-color view_bg_color        @bg_base;
@@ -36,10 +36,10 @@
 @define-color accent_bg_color      @accent;
 @define-color accent_color         @accent;
 
-/* libadwaita 1.6'dan beri ayni tokenlar CSS degiskeni olarak da okunuyor ve
- * diyalog/kart gibi bazi yerlerde yalnizca bunlar dikkate aliniyor.
- * GTK 4.14'te `:root` desteklenmedigi icin blok sessizce atlanir —
- * orada yukaridaki @define-color tanimlari gecerli kalir. */
+/* Since libadwaita 1.6 the same tokens are also read as CSS variables, and in
+ * places like dialogs and cards only those are honoured. GTK 4.14 does not
+ * support `:root`, so the block is skipped there and the @define-color
+ * definitions above remain in force. */
 :root {
   --window-bg-color:    #0d0d12;
   --window-fg-color:    #f5f6f8;
@@ -57,7 +57,7 @@
   --accent-color:       #4a7dff;
 }
 
-/* --- taban --- */
+/* --- base --- */
 
 window.runetty {
   font-family: Inter, "Adwaita Sans", Cantarell, "Noto Sans", sans-serif;
@@ -75,7 +75,7 @@ window.runetty {
 .dim      { color: @fg_secondary; }
 .dimmer   { color: @fg_tertiary; }
 
-/* --- icerik zemini: iki dusuk doygunluklu radyal gecis --- */
+/* --- content background: two low-saturation radial gradients --- */
 
 .content-bg {
   background-color: @bg_base;
@@ -86,7 +86,7 @@ window.runetty {
                     alpha(#8b5cf6, 0.08) 0%, transparent 58%);
 }
 
-/* --- mod secici (kenar cubugu ust bari) --- */
+/* --- mode switcher (sidebar top bar) --- */
 
 .icon-rail {
   padding: 0;
@@ -108,7 +108,7 @@ window.runetty {
 .icon-rail button:checked,
 .icon-rail button:active { background-color: @accent; color: #ffffff; }
 
-/* --- baslik cubugu --- */
+/* --- header bar --- */
 
 headerbar.runetty {
   background-color: @bg_sidebar;
@@ -135,7 +135,7 @@ headerbar.runetty {
   color: @fg_primary;
 }
 
-/* --- kenar cubugu --- */
+/* --- sidebar --- */
 
 .sidebar-pane {
   background-color: @bg_sidebar;
@@ -150,7 +150,7 @@ headerbar.runetty {
   padding: 14px 12px 6px 12px;
 }
 
-/* iki katmanli liste satiri */
+/* two-layer list row */
 
 .session-row {
   min-height: 44px;
@@ -167,7 +167,7 @@ headerbar.runetty {
 .row-subtitle { font-size: 11px; font-weight: 400; color: @fg_secondary; }
 .row-meta     { font-size: 10px; font-weight: 400; color: @fg_tertiary; }
 
-/* durum noktasi */
+/* status dot */
 
 .status-dot {
   min-width: 8px;
@@ -181,7 +181,7 @@ headerbar.runetty {
 .status-dot.done    { background-color: @state_done; }
 .status-dot.idle    { background-color: @state_idle; }
 
-/* hap rozet */
+/* pill badge */
 
 .badge {
   font-size: 10px;
@@ -197,7 +197,7 @@ headerbar.runetty {
 .badge.working { color: @state_working; background-color: alpha(#3b82f6, 0.14); }
 .badge.done    { color: @state_done;    background-color: alpha(#4ade80, 0.14); }
 
-/* kenar cubugu alt bari */
+/* sidebar footer */
 
 .sidebar-footer {
   min-height: 40px;
@@ -228,7 +228,7 @@ headerbar.runetty {
 
 .sidebar-footer button:hover { background-color: @bg_hover; color: @fg_primary; }
 
-/* --- bos durum --- */
+/* --- empty state --- */
 
 .empty-title {
   font-size: 17px;
@@ -273,7 +273,7 @@ headerbar.runetty {
 
 .hint-row { font-size: 10px; color: @fg_tertiary; }
 
-/* --- sekmeler --- */
+/* --- tabs --- */
 
 tabbar.runetty > * { background-color: @bg_sidebar; }
 
@@ -304,7 +304,7 @@ tabbar.runetty tabbox > tab:checked {
   padding: 6px 8px;
 }
 
-/* listbox'i sifirla: cerceve ve kendi zemini olmasin */
+/* reset the listbox: no frame, no background of its own */
 .sidebar-pane listbox,
 .sidebar-pane list {
   background: none;
@@ -332,7 +332,7 @@ tabbar.runetty tabbox > tab:checked {
   color: @fg_secondary;
 }
 
-/* --- popover ve menuler --- */
+/* --- popovers and menus --- */
 
 popover > contents,
 popover.menu > contents {
@@ -367,7 +367,7 @@ popover.menu separator {
   margin: 4px 2px;
 }
 
-/* --- baglanti durumu noktasi --- */
+/* --- connection status dot --- */
 
 @define-color state_open    #4ade80;
 @define-color state_trouble #e8a33d;
@@ -377,7 +377,7 @@ popover.menu separator {
 .status-dot.trouble { background-color: @state_trouble; }
 .status-dot.closed  { background-color: alpha(#f4766d, 0.55); }
 
-/* --- surukle birak --- */
+/* --- drag and drop --- */
 
 .drop-target {
   background-color: alpha(#4a7dff, 0.14);
@@ -407,7 +407,7 @@ popover.menu separator {
   color: @fg_tertiary;
 }
 
-/* Halkanin rengi widget'in CSS renginden okunuyor; esik sinifini Rust koyar. */
+/* The ring colour is read from the widget's CSS colour; Rust sets the threshold class. */
 .ring            { color: @fg_secondary; }
 .ring.ring-warn  { color: @state_blocked; }
 .ring.ring-alert { color: @state_closed; }
@@ -429,7 +429,7 @@ button.retry {
 
 button.retry:hover { background-color: @bg_hover; }
 
-/* --- klasor satiri --- */
+/* --- folder row --- */
 
 .folder-header {
   padding: 0 6px 0 0;
@@ -447,7 +447,7 @@ button.folder-action {
   opacity: 0;
 }
 
-/* Dugmeler satirin ustune gelince beliriyor: liste sakin kaliyor. */
+/* Buttons appear on row hover, keeping the list calm. */
 .folder-header:hover button.folder-action,
 button.folder-action:focus {
   opacity: 1;
@@ -480,7 +480,7 @@ button.folder-action:hover {
   padding: 8px 16px 2px 16px;
 }
 
-/* Sabit panelde kartlar dar sutuna giriyor; kenar bosluklari kisiliyor. */
+/* In a pinned pane the cards fit a narrow column; margins tighten. */
 .content-bg.pinned {
   border-left: 1px solid @hairline;
 }

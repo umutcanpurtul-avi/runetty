@@ -1,6 +1,6 @@
-//! `--screenshot <dosya>`: pencereyi PNG'ye basip cikar.
-//! Faz 1'in gecme olcutu "iki ekran goruntusu yan yana ayirt edilemiyor"
-//! oldugu icin bu, uygulamanin kendi gelistirme araci.
+//! `--screenshot <file>`: render the window to a PNG and exit.
+//! Phase one is judged by putting two screenshots side by side, so this
+//! is the app's own development tool for that comparison.
 
 use std::time::Duration;
 
@@ -10,8 +10,8 @@ use gtk::{glib, gdk};
 pub fn schedule(window: &adw::ApplicationWindow, path: String) {
     let window = window.clone();
 
-    // Ilk kare cizilmeden anlik goruntu bos cikar; bir frame clock turu bekle.
-    // Ag bekleyen ekranlari yakalamak icin gecikme uzatilabiliyor.
+    // A snapshot before the first frame is blank, so wait a frame clock tick.
+    // The delay can be stretched to capture screens still waiting on the network.
     let delay = std::env::var("RUNETTY_SCREENSHOT_DELAY_MS")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -21,11 +21,11 @@ pub fn schedule(window: &adw::ApplicationWindow, path: String) {
         match capture(&window) {
             Some(texture) => match texture.save_to_png(&path) {
                 Ok(()) => println!("runetty: {path}"),
-                Err(error) => eprintln!("runetty: PNG yazilamadi: {error}"),
+                Err(error) => eprintln!("runetty: could not write PNG: {error}"),
             },
-            None => eprintln!("runetty: pencere henuz cizilmemis"),
+            None => eprintln!("runetty: window has not been drawn yet"),
         }
-        // Diyalog acikken close() yutulabiliyor; uygulamayi dogrudan bitir.
+        // close() can be swallowed while a dialog is up; quit the app outright.
         match window.application() {
             Some(app) => app.quit(),
             None => window.close(),
@@ -34,8 +34,8 @@ pub fn schedule(window: &adw::ApplicationWindow, path: String) {
 }
 
 fn capture(window: &adw::ApplicationWindow) -> Option<gdk::Texture> {
-    // Pencerenin kendisi: diyaloglar ve toast'lar icerik agacinin disinda,
-    // ustune bindirilmis bir katmanda duruyor.
+    // The window itself: dialogs and toasts live in a layer above the
+    // content tree, not inside it.
     let widget = window.clone().upcast::<gtk::Widget>();
     let (width, height) = (widget.width() as f64, widget.height() as f64);
     if width < 1.0 || height < 1.0 {

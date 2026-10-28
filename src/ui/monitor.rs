@@ -1,8 +1,8 @@
-//! Monitor sayfasi: sunucu basina bir kart, kartta uc halka.
+//! Monitor page: one card per host, three rings per card.
 //!
-//! Olcum turu sunucu basina tek `ssh` cagrisi; kanal `ControlMaster` ile
-//! acik kaliyor. Tur, sayfa gorunur degilken hic calismiyor — kapali bir
-//! sekmenin arka planda ag ve CPU yakmasi icin bir sebep yok.
+//! A round is one `ssh` call per host; the channel stays open through
+//! `ControlMaster`. Rounds stop entirely when the page is not visible - there
+//! is no reason for a hidden tab to burn network and CPU.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ use crate::data::Host;
 const INTERVAL: Duration = Duration::from_secs(2);
 
 struct Card {
-    /// Dis kutu: ustte ozet satiri, altinda acilir detay.
+    /// Outer box: summary row on top, expandable detail below.
     widget: gtk::Box,
     detail_command: Vec<String>,
     detail: gtk::Revealer,
@@ -41,7 +41,7 @@ struct Card {
 
 pub struct Monitor {
     pub widget: gtk::Widget,
-    /// Sagda sabit panel olarak mi duruyor, sekmede mi?
+    /// Pinned as a right-hand pane, or living in a tab?
     pinned: Cell<bool>,
     pin_button: gtk::Button,
     list: gtk::Box,
@@ -52,7 +52,7 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    /// Sayfa gorunur oldugunda tur baslar, gorunmez oldugunda durur.
+    /// Rounds start when the page becomes visible and stop when it hides.
     pub fn set_active(self: &Rc<Self>, active: bool) {
         if active {
             self.rebuild();
@@ -85,9 +85,9 @@ impl Monitor {
             "pin-right-symbolic"
         });
         self.pin_button.set_tooltip_text(Some(if pinned {
-            "Sekmeye geri al"
+            "Move back to a tab"
         } else {
-            "Saga sabitle"
+            "Pin to the right"
         }));
 
         if pinned {
@@ -97,7 +97,7 @@ impl Monitor {
         }
     }
 
-    /// Dogrulama icin: bir kartin detayini programatik acar.
+    /// For verification: expands a card's detail programmatically.
     pub fn expand(self: &Rc<Self>, alias: &str) {
         self.rebuild();
         let card = self.cards.borrow().get(alias).cloned();
@@ -109,12 +109,12 @@ impl Monitor {
         load_detail(&card);
     }
 
-    /// Izleme listesi degisince disaridan cagrilir.
+    /// Called from outside when the watch list changes.
     pub fn rebuild_now(self: &Rc<Self>) {
         self.rebuild();
     }
 
-    /// Kayit listesi degisince kartlari yeniden kurar.
+    /// Rebuilds the cards when the record list changes.
     fn rebuild(self: &Rc<Self>) {
         let hosts = self.store.borrow().monitored();
         let aliases: Vec<String> = hosts.iter().map(|host| host.alias.clone()).collect();
@@ -143,7 +143,7 @@ impl Monitor {
         self.empty.set_visible(hosts.is_empty());
     }
 
-    /// Halka cizimini ag olmadan dogrulamak icin: her karta artan degerler.
+    /// To verify ring drawing without a network: rising values per card.
     pub fn demo(self: &Rc<Self>) {
         self.rebuild();
 
@@ -167,8 +167,8 @@ impl Monitor {
         let cards: Vec<Rc<Card>> = self.cards.borrow().values().cloned().collect();
 
         for card in cards {
-            // Onceki tur hala suruyorsa yenisini kuyruga ekleme: yavas bir
-            // sunucu butun turu geriletmesin.
+            // Skip hosts whose previous round is still running, so one slow
+            // host does not hold back the whole round.
             if card.busy.get() {
                 continue;
             }
@@ -234,8 +234,8 @@ async fn run(command: &[String], alias: &str) -> Result<String, String> {
         gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_PIPE,
     );
 
-    // Kanal henuz acik degilse parola keyring'den gelsin; terminalde
-    // oldugu gibi komut satirinda hic gorunmuyor.
+    // With no channel open yet, take the password from the keyring; as in the
+    // terminal it never appears on the command line.
     if crate::data::secrets::has(alias) {
         if let Ok(exe) = std::env::current_exe() {
             launcher.setenv("SSH_ASKPASS", exe.as_os_str(), true);
@@ -265,7 +265,7 @@ async fn run(command: &[String], alias: &str) -> Result<String, String> {
         return Ok(stdout.map(|text| text.to_string()).unwrap_or_default());
     }
 
-    // ssh'in kendi mesaji kullanicinin isine yarar; ilk satiri yeterli.
+    // ssh's own message is what helps the user; the first line is enough.
     let message = stderr
         .map(|text| text.to_string())
         .unwrap_or_default()
@@ -316,14 +316,14 @@ fn build_card(host: &Host) -> Card {
         gauges.append(&gauge(ring, reading, label));
     }
 
-    // Hata, kartin icinde ve cozum eyleminin yaninda duruyor.
+    // The error sits inside the card, next to the action that fixes it.
     let error = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     error.set_valign(gtk::Align::Center);
     error.set_halign(gtk::Align::End);
     error.set_visible(false);
 
-    // Sabit genislik: mesaj uzunlugu degisince Retry'in yeri kaymasin,
-    // kartlar alt alta hizali dursun.
+    // Fixed width so Retry does not shift as the message length changes and
+    // cards stay aligned down the column.
     let error_text = gtk::Label::new(None);
     error_text.add_css_class("monitor-error");
     error_text.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -379,7 +379,7 @@ fn build_card(host: &Host) -> Card {
     let error_label = card.error_text.clone();
     retry.connect_clicked(move |button| {
         button.set_sensitive(false);
-        error_label.set_text("[!] baglaniyor...");
+        error_label.set_text("[!] connecting...");
 
         let command = command.clone();
         let alias = alias.clone();
@@ -397,8 +397,8 @@ fn build_card(host: &Host) -> Card {
     card
 }
 
-/// Karta tiklandiginda detayi acar/kapatir. Detay yalnizca acikken
-/// sorgulaniyor; kapali kartlar icin fazladan tur yok.
+/// Toggles the detail when a card is clicked. Detail is only probed while
+/// expanded, so collapsed cards cost nothing extra.
 fn attach_expander(card: &Rc<Card>) {
     let gesture = gtk::GestureClick::new();
     gesture.set_button(gtk::gdk::BUTTON_PRIMARY);
@@ -437,13 +437,9 @@ fn load_detail(card: &Rc<Card>) {
         }
 
         match result.ok().and_then(|output| metrics::parse_detail(&output)) {
-            Some(detail) => {
-                for panel in detail_panels(&detail) {
-                    body.append(&panel);
-                }
-            }
+            Some(detail) => body.append(&detail_columns(&detail)),
             None => {
-                let label = gtk::Label::new(Some("Detay alinamadi."));
+                let label = gtk::Label::new(Some("Could not fetch detail."));
                 label.set_xalign(0.0);
                 label.add_css_class("row-meta");
                 body.append(&label);
@@ -452,23 +448,69 @@ fn load_detail(card: &Rc<Card>) {
     });
 }
 
-fn detail_panels(detail: &metrics::Detail) -> Vec<gtk::Widget> {
+/// Panels are spread across two columns:
+///   CPU     | MEMORY
+///   DISK    | TOP PROCESSES
+///   NETWORK |
+/// The left column holds short fixed rows, the right one the growing tables.
+/// In a narrow pane (pinned Monitor) the columns stack instead.
+fn detail_columns(detail: &metrics::Detail) -> gtk::Widget {
+    let (left_panels, right_panels) = detail_panels(detail);
+
+    let left = gtk::Box::new(gtk::Orientation::Vertical, 14);
+    left.set_hexpand(true);
+    for panel in left_panels {
+        left.append(&panel);
+    }
+
+    let right = gtk::Box::new(gtk::Orientation::Vertical, 14);
+    right.set_hexpand(true);
+    for panel in right_panels {
+        right.append(&panel);
+    }
+
+    let columns = gtk::Box::new(gtk::Orientation::Horizontal, 28);
+    columns.set_homogeneous(true);
+    columns.append(&left);
+    columns.append(&right);
+
+    // Two columns become unreadable in a narrow pane. BreakpointBin exists for
+    // exactly this: below 560 pixels the columns stack.
+    let bin = adw::BreakpointBin::new();
+    bin.set_child(Some(&columns));
+    bin.set_size_request(180, 40);
+
+    if let Ok(condition) = adw::BreakpointCondition::parse("max-width: 560px") {
+        let breakpoint = adw::Breakpoint::new(condition);
+        breakpoint.add_setter(
+            &columns,
+            "orientation",
+            Some(&gtk::Orientation::Vertical.to_value()),
+        );
+        breakpoint.add_setter(&columns, "homogeneous", Some(&false.to_value()));
+        bin.add_breakpoint(breakpoint);
+    }
+
+    bin.upcast()
+}
+
+fn detail_panels(detail: &metrics::Detail) -> (Vec<gtk::Widget>, Vec<gtk::Widget>) {
     let sample = &detail.sample;
 
     let cpu = panel(
         "CPU",
         &[
-            ("Cekirdek", format!("{}", sample.cores)),
-            ("Yuk (1/5/15)", format!(
+            ("Cores", format!("{}", sample.cores)),
+            ("Load (1/5/15)", format!(
                 "{:.2} · {:.2} · {:.2}",
                 detail.load[0], detail.load[1], detail.load[2]
             )),
-            ("Calisma suresi", sample.uptime_text()),
+            ("Uptime", sample.uptime_text()),
         ],
     );
 
     let swap = if detail.swap_total_kb == 0 {
-        "yok".to_string()
+        "none".to_string()
     } else {
         format!(
             "{} / {} ({:.0}%)",
@@ -481,7 +523,7 @@ fn detail_panels(detail: &metrics::Detail) -> Vec<gtk::Widget> {
     let memory = panel(
         "MEMORY",
         &[
-            ("Kullanilan", format!(
+            ("Used", format!(
                 "{} / {} ({:.0}%)",
                 metrics::human_kb(sample.mem_total_kb - sample.mem_available_kb),
                 metrics::human_kb(sample.mem_total_kb),
@@ -531,13 +573,17 @@ fn detail_panels(detail: &metrics::Detail) -> Vec<gtk::Widget> {
         })
         .collect();
 
-    vec![
-        cpu,
-        memory,
-        table("DISK", &["Baglanti noktasi", "Kullanim", ""], &disks),
-        table("NETWORK", &["Arayuz", "Alinan", "Gonderilen"], &network),
-        table("TOP PROCESSES", &["Surec", "CPU", "Bellek"], &processes),
-    ]
+    (
+        vec![
+            cpu,
+            table("DISK", &["Mount point", "Usage", ""], &disks),
+            table("NETWORK", &["Interface", "Received", "Sent"], &network),
+        ],
+        vec![
+            memory,
+            table("TOP PROCESSES", &["Process", "CPU", "Memory"], &processes),
+        ],
+    )
 }
 
 fn panel(title: &str, rows: &[(&str, String)]) -> gtk::Widget {
@@ -571,7 +617,7 @@ fn table(title: &str, headers: &[&str; 3], rows: &[(String, String, String)]) ->
     column.append(&super::rows::section_header(title));
 
     if rows.is_empty() {
-        let empty = gtk::Label::new(Some("veri yok"));
+        let empty = gtk::Label::new(Some("no data"));
         empty.set_xalign(0.0);
         empty.add_css_class("row-meta");
         column.append(&empty);
@@ -618,7 +664,8 @@ fn gauge(ring: &Ring, reading: &gtk::Label, label: &str) -> gtk::Box {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 4);
     column.set_halign(gtk::Align::Center);
 
-    // Yuzde halkanin icinde: renk esigi uzaktan, sayi yakindan okunuyor.
+    // Percentage inside the ring: the colour threshold reads from afar, the
+    // number up close.
     ring.set_size_request(50, 50);
     reading.add_css_class("gauge-value");
 
@@ -643,8 +690,8 @@ pub fn build(store: Rc<RefCell<Store>>) -> Rc<Monitor> {
     list.set_margin_end(16);
 
     let empty = gtk::Label::new(Some(
-        "Izlenen sunucu yok. Listeden bir sunucuya sag tiklayip\n\
-         \"Monitor'e ekle\" diyebilirsin.",
+        "No hosts are being watched. Right-click a host in the list and choose\n\
+         \"Add to Monitor\".",
     ));
     empty.add_css_class("row-meta");
     empty.set_margin_top(24);
@@ -655,8 +702,8 @@ pub fn build(store: Rc<RefCell<Store>>) -> Rc<Monitor> {
     scroller.set_vexpand(true);
     scroller.set_child(Some(&list));
 
-    // Baslik satiri: sabitleme dugmesi burada dursun ki sekmede de
-    // sabit panelde de ayni yerde olsun.
+    // Header row: the pin button lives here so it is in the same place
+    // whether Monitor is a tab or a pinned pane.
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     bar.add_css_class("monitor-bar");
 
@@ -667,7 +714,7 @@ pub fn build(store: Rc<RefCell<Store>>) -> Rc<Monitor> {
 
     let pin = gtk::Button::from_icon_name("pin-right-symbolic");
     pin.add_css_class("flat");
-    pin.set_tooltip_text(Some("Saga sabitle"));
+    pin.set_tooltip_text(Some("Pin to the right"));
     pin.set_valign(gtk::Align::Center);
 
     bar.append(&title);

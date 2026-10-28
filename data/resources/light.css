@@ -1,8 +1,9 @@
-/* Acik palet.
- * style.css yapiyi ve koyu paleti tutuyor; bu dosya yalnizca renkleri
- * yeniden tanimliyor ve koyu temaya ozgu birkac yeri duzeltiyor.
- * Ayri dosya olmasinin sebebi GTK 4.14: `@define-color` kosullu olamiyor,
- * CSS degiskenleri ise 4.16'dan once yok. Iki saglayici en tasinabilir yol.
+/* Light palette.
+ * style.css holds the structure and the dark palette; this file only
+ * redefines colours and fixes a few places built for the dark theme.
+ * It is a separate file because of GTK 4.14: `@define-color` cannot be
+ * conditional and CSS variables do not exist before 4.16. Two providers are
+ * the most portable answer.
  */
 
 @define-color bg_base        #f6f6f9;
@@ -57,8 +58,8 @@
   --accent-color:       #2f63e8;
 }
 
-/* Zemin gecisi acik temada cok daha hafif olmali; koyu temadaki degerler
- * beyaz uzerinde kirli bir leke gibi duruyor. */
+/* The background gradient must be far lighter here; the dark theme's values
+ * read as a grubby smear over white. */
 .content-bg {
   background-color: @bg_base;
   background-image:
@@ -68,7 +69,7 @@
                     alpha(#8b5cf6, 0.05) 0%, transparent 58%);
 }
 
-/* Koyu temada beyaz saydamlikla kurulan yuzeyler, acik temada siyahla. */
+/* Surfaces built from white transparency in the dark theme use black here. */
 .global-search,
 .command-field,
 .chip,

@@ -1,11 +1,11 @@
-//! Sunucu kayitlarinin veri katmani.
+//! Data layer for server records.
 //!
-//! Iki kaynak var ve ayrimi bilerek koruyoruz:
-//!   - `~/.ssh/config`  : `ssh`, `scp`, `rsync` ile paylasilan gercek ayar.
-//!                        Buradan gelen kayitlari runetty silmez, yalniz gizler.
-//!   - `hosts.toml`     : runetty'nin kendi ekledikleri + klasor, etiket, zaman.
+//! There are two sources and the split is deliberate:
+//!   - `~/.ssh/config`: the real configuration shared with `ssh`, `scp`, `rsync`.
+//!                      runetty never deletes those records, only hides them.
+//!   - `hosts.toml`:    runetty's own entries plus folder, label and timestamps.
 //!
-//! Plandaki karar: baglanti alanlari ssh config'e, gorunum alanlari TOML'a.
+//! Per the plan: connection fields belong in ssh config, presentation in TOML.
 
 pub mod hostkey;
 pub mod metrics;
@@ -19,9 +19,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Source {
-    /// ~/.ssh/config icinden okundu.
+    /// Read from ~/.ssh/config.
     SshConfig,
-    /// runetty'nin kendi kaydi.
+    /// runetty's own record.
     Local,
 }
 
@@ -32,17 +32,17 @@ pub struct Host {
     pub user: Option<String>,
     pub port: Option<u16>,
     pub folder: Option<String>,
-    /// `-i` ile gecilen ozel anahtar. ssh config'te `IdentityFile`.
+    /// Private key passed with `-i`; `IdentityFile` in ssh config.
     pub identity_file: Option<String>,
     pub last_used: Option<u64>,
-    /// Monitor'de izlenip izlenmedigi. Varsayilan kapali: her kayit icin
-    /// iki saniyede bir ssh calistirmak kimsenin istemedigi bir maliyet.
+    /// Whether Monitor watches this host. Off by default: running ssh every
+    /// two seconds for every record is a cost nobody asked for.
     pub monitored: bool,
     pub source: Source,
 }
 
 impl Host {
-    /// Liste satirinin ikinci katmani: `user@host[:port]`
+    /// Second layer of a list row: `user@host[:port]`
     pub fn user_host(&self) -> String {
         let host = if self.hostname.is_empty() {
             self.alias.as_str()
@@ -61,17 +61,17 @@ impl Host {
         }
     }
 
-    /// Baglanti icin gereken butun `ssh` argumanlari — hedef dahil.
+    /// Every `ssh` argument needed to connect, target included.
     ///
-    /// Terminal oturumu da Monitor olcumu de buradan besleniyor. Tek kaynak
-    /// olmasi onemli: port ve anahtar gibi alanlar bir tarafta unutulursa
-    /// Monitor yanlis sunucuya ya da yanlis kimlikle baglanir.
+    /// Both terminal sessions and Monitor probes come from here. A single
+    /// source matters: if a field like port or key is missed on one side,
+    /// Monitor connects to the wrong host or with the wrong identity.
     pub fn ssh_args(&self) -> Vec<String> {
         let mut args: Vec<String> = vec!["ssh".into()];
         args.extend(control_options());
 
         if self.source == Source::SshConfig {
-            // Port, anahtar, jump host: hepsi ssh config'te tanimli.
+            // Port, key, jump host: all already defined in ssh config.
             args.push(self.alias.clone());
             return args;
         }
@@ -92,7 +92,7 @@ impl Host {
         args
     }
 
-    /// Terminalde calistirilacak kabuk komutu.
+    /// Shell command to run in the terminal.
     pub fn command(&self) -> String {
         self.ssh_args()
             .iter()
@@ -113,14 +113,14 @@ fn needs_quoting(value: &str) -> bool {
     value.contains(|c: char| c.is_whitespace() || "'\"$`\\;&|<>()*?[]{}".contains(c))
 }
 
-/// Dosya yolu bosluk ya da ozel karakter icerebilir; kabuga tek tirnakla gecir.
+/// A path may contain spaces or shell metacharacters; single-quote it.
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-/// Terminal oturumu ve Monitor turu ayni kalici kanali paylasiyor.
-/// Boylece kimlik dogrulama sunucu basina bir kez yapiliyor: ilk oturumda
-/// parola/anahtar verilince sonraki her baglanti ayni kanaldan geciyor.
+/// Terminal sessions and Monitor probes share one persistent channel, so
+/// authentication happens once per host: after the first session supplies the
+/// password or key, every later connection rides the same channel.
 pub fn control_options() -> Vec<String> {
     let Some(dir) = control_dir() else {
         return Vec::new();
@@ -131,9 +131,9 @@ pub fn control_options() -> Vec<String> {
 fn control_options_in(dir: &std::path::Path) -> Vec<String> {
     let path = format!("{}/cm-%C", dir.display());
 
-    // Unix soket yolu 108 bayt ile sinirli ve `%C` acilinca daha da uzuyor.
-    // Sinira yaklasiyorsa paylasimdan vazgec: yavas ama calisir, aksi halde
-    // ssh "ControlPath too long" deyip hic baglanmaz.
+    // A unix socket path is capped at 108 bytes and `%C` expands further.
+    // Near the limit, give up sharing: slower but working, since otherwise
+    // ssh refuses with "ControlPath too long" and never connects.
     if path.len() + 24 >= 108 {
         return Vec::new();
     }
@@ -146,13 +146,13 @@ fn control_options_in(dir: &std::path::Path) -> Vec<String> {
         "-o".into(),
         "ControlMaster=auto".into(),
         "-o".into(),
-        // Terminal kapansa bile kanal biraz yasasin: Monitor turu ve
-        // hemen ardindan acilan ikinci oturum yeniden parola istemesin.
+        // Keep the channel alive briefly after the terminal closes, so a Monitor
+        // probe or a second session opened right after need not re-authenticate.
         "ControlPersist=600".into(),
     ]
 }
 
-/// Unix soket yolu kisa olmali; `%C` zaten kisa bir hash.
+/// The socket path must stay short; `%C` is already a short hash.
 pub fn control_dir() -> Option<std::path::PathBuf> {
     dirs::runtime_dir().or_else(dirs::cache_dir).map(|dir| dir.join("runetty"))
 }
@@ -164,7 +164,7 @@ pub fn now() -> u64 {
         .unwrap_or(0)
 }
 
-/// "2m", "18m", "3h", "6d" — sagda duran goreli zaman.
+/// "2m", "18m", "3h", "6d" - the relative time shown on the right.
 pub fn relative(timestamp: Option<u64>) -> String {
     let Some(timestamp) = timestamp else {
         return String::new();
@@ -192,8 +192,8 @@ mod control_tests {
         assert!(options.iter().any(|option| option == "ControlMaster=auto"));
     }
 
-    /// Unix soketi 108 bayt ile sinirli. "too long" deyip hic baglanamamaktansa
-    /// kanal paylasimindan vazgecip calismaya devam etmek daha iyi.
+    /// A unix socket is capped at 108 bytes. Dropping channel sharing and
+    /// still working beats failing outright with "too long".
     #[test]
     fn overlong_path_disables_sharing_instead_of_failing() {
         let deep = format!("/tmp/{}/runetty", "x".repeat(120));

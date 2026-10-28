@@ -1,5 +1,5 @@
-//! Iki katmanli liste satiri ve yardimcilari.
-//! Plandaki "Ozel widget" maddesi: ozel cizim yok, gtk::Box kompozisyonu.
+//! The two-layer list row and its helpers.
+//! The plan's "custom widget" item: no custom drawing, just gtk::Box composition.
 
 use gtk::prelude::*;
 
@@ -30,7 +30,7 @@ pub fn badge(text: &str, state_css: &str) -> gtk::Label {
     label
 }
 
-/// Ad (Inter) ustte, `user@host` (monospace) altta, sagda meta.
+/// Name (Inter) on top, `user@host` (monospace) below, meta on the right.
 fn two_layer(title: &str, subtitle: &str, lead: Option<gtk::Widget>, trail: gtk::Widget) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     row.add_css_class("session-row");

@@ -1,8 +1,8 @@
-//! CPU / MEM / DISK halkasi.
+//! The CPU / MEM / DISK ring.
 //!
-//! Ozel cizim `snapshot` ile yapiliyor (cairo degil): on kart x uc halka,
-//! iki saniyede bir yeniden ciziliyor. Renk widget'in CSS renginden geliyor,
-//! yani esik kararini Rust veriyor ama paleti yine style.css tutuyor.
+//! Drawn with `snapshot` rather than cairo: ten cards times three rings,
+//! redrawn every two seconds. The colour comes from the widget's CSS colour,
+//! so Rust decides the threshold while style.css still owns the palette.
 
 use std::cell::Cell;
 
@@ -51,7 +51,7 @@ mod imp {
             let stroke = gsk::Stroke::new(thickness);
             stroke.set_line_cap(gsk::LineCap::Round);
 
-            // Zemin halkasi her zaman cizilir: deger bilinmese de yer tutuyor.
+            // The track is always drawn: it holds the space even with no value.
             let builder = gsk::PathBuilder::new();
             builder.add_circle(&center, radius);
             snapshot.append_stroke(&builder.to_path(), &stroke, &track);
@@ -65,7 +65,7 @@ mod imp {
                 return;
             }
 
-            // Tam dolu yay `arc_to` ile cizilemez; daireyi oldugu gibi kullan.
+            // A full sweep cannot be drawn as an arc; use the circle as is.
             let path = if fraction >= 0.999 {
                 let builder = gsk::PathBuilder::new();
                 builder.add_circle(&center, radius);
@@ -78,7 +78,7 @@ mod imp {
         }
     }
 
-    /// Saat yonunde, tepeden baslayan yay.
+    /// Clockwise arc starting at the top.
     fn arc(center: &gtk::graphene::Point, radius: f32, fraction: f32) -> gsk::Path {
         use std::f32::consts::PI;
 
@@ -92,8 +92,8 @@ mod imp {
             center.y() + radius * start.sin(),
         );
 
-        // Kisa dogru parcalari: 64 adimda halka gozle duz gorunmuyor ve
-        // her turda yeniden kurmak conic yay matematiginden ucuz.
+        // Short line segments: at 64 steps the ring reads as smooth, and
+        // rebuilding it each round is cheaper than conic arc maths.
         for step in 1..=steps {
             let angle = start + sweep * (step as f32 / steps as f32);
             builder.line_to(
@@ -127,14 +127,14 @@ impl Ring {
         ring
     }
 
-    /// `None` = olcum yok. Sifir gostermek "her sey yolunda" demek olurdu.
+    /// `None` means no reading. Showing zero would say "all is well".
     pub fn set_value(&self, value: Option<f64>) {
         let imp = self.imp();
 
         match value {
             Some(value) => {
                 if imp.known.get() && (imp.value.get() - value).abs() < 0.5 {
-                    return; // Degismediyse yeniden cizme.
+                    return; // Unchanged, so skip the redraw.
                 }
                 imp.value.set(value);
                 imp.known.set(true);
@@ -151,7 +151,7 @@ impl Ring {
         self.queue_draw();
     }
 
-    /// Esik karari burada, renk style.css'te.
+    /// The threshold decision is here, the colour in style.css.
     fn apply_threshold(&self, value: Option<f64>) {
         for class in ["ring-warn", "ring-alert"] {
             self.remove_css_class(class);

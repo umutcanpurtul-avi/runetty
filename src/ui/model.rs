@@ -1,5 +1,5 @@
-//! Agent paneli icin ornek veri. Sunucu kayitlari artik `crate::data`'dan
-//! geliyor; agent'lar faz 3'te gercek kaynaga baglanacak.
+//! Sample data for the agent panel. Server records now come from
+//! `crate::data`; agents will be wired to a real source later.
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum AgentState {
@@ -10,7 +10,7 @@ pub enum AgentState {
 }
 
 impl AgentState {
-    /// CSS sinif adi; renk karari style.css'te.
+    /// CSS class name; the colour decision lives in style.css.
     pub fn css(self) -> &'static str {
         match self {
             Self::Blocked => "blocked",

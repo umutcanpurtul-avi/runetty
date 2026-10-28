@@ -1,7 +1,7 @@
-//! Sunucu ekleme / duzenleme diyalogu.
+//! Dialog for adding and editing a server.
 //!
-//! Baglanti alanlari runetty'nin kendi kaydina yazilir; ~/.ssh/config'e
-//! dokunulmaz. Parola dosyaya degil sistem keyring'ine gider.
+//! Connection fields are written to runetty's own record; ~/.ssh/config is
+//! left alone. The password goes to the system keyring, never to a file.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,8 +24,8 @@ pub fn present<F>(
     present_in_folder(parent, store, alias, None, on_saved)
 }
 
-/// `prefill_folder`: klasorun yanindaki + dugmesinden gelen yeni kayit,
-/// dogrudan o klasorde baslasin.
+/// `prefill_folder`: a new record started from the + beside a folder should
+/// begin in that folder.
 pub fn present_in_folder<F>(
     parent: &impl IsA<gtk::Widget>,
     store: Rc<RefCell<Store>>,
@@ -51,7 +51,7 @@ pub fn present_in_folder<F>(
     let folder = adw::EntryRow::new();
     folder.set_title("Folder");
 
-    // Var olan klasorler bir menuden secilebiliyor; yeni ad yazmak da serbest.
+    // Existing folders can be picked from a menu; typing a new name is free.
     let known = store.borrow().folders();
     if !known.is_empty() {
         let menu = gio::Menu::new();
@@ -82,7 +82,7 @@ pub fn present_in_folder<F>(
         button.set_icon_name("pan-down-symbolic");
         button.add_css_class("flat");
         button.set_valign(gtk::Align::Center);
-        button.set_tooltip_text(Some("Var olan klasorler"));
+        button.set_tooltip_text(Some("Existing folders"));
         button.set_menu_model(Some(&menu));
         folder.add_suffix(&button);
     }
@@ -100,15 +100,15 @@ pub fn present_in_folder<F>(
     let auth = adw::PreferencesGroup::new();
     auth.set_title("Authentication");
     auth.set_description(Some(
-        "Anahtar varsa ssh once onu dener. Parola sistem keyring'ine kaydedilir, \
-         hicbir dosyaya duz metin yazilmaz.",
+        "If a key is set, ssh tries it first. The password is stored in the system \
+         keyring and never written to any file in plain text.",
     ));
 
     let key = adw::EntryRow::new();
     key.set_title("SSH Key");
 
-    // Bos geliyor: anahtari uygulama degil kullanici secer.
-    // ~/.ssh'deki anahtarlar menude hazir, disaridan dosya secmek de serbest.
+    // Left empty: the user picks the key, not the app.
+    // Keys in ~/.ssh are offered in a menu; any other file can be chosen too.
     let keys = available_keys();
     if !keys.is_empty() {
         let menu = gio::Menu::new();
@@ -137,7 +137,7 @@ pub fn present_in_folder<F>(
         list.set_icon_name("pan-down-symbolic");
         list.add_css_class("flat");
         list.set_valign(gtk::Align::Center);
-        list.set_tooltip_text(Some("~/.ssh icindeki anahtarlar"));
+        list.set_tooltip_text(Some("Keys in ~/.ssh"));
         list.set_menu_model(Some(&menu));
         key.add_suffix(&list);
     }
@@ -145,7 +145,7 @@ pub fn present_in_folder<F>(
     let browse = gtk::Button::from_icon_name("document-open-symbolic");
     browse.add_css_class("flat");
     browse.set_valign(gtk::Align::Center);
-    browse.set_tooltip_text(Some("Baska bir dosya sec"));
+    browse.set_tooltip_text(Some("Choose another file"));
     key.add_suffix(&browse);
     auth.add(&key);
 
@@ -173,14 +173,14 @@ pub fn present_in_folder<F>(
 
         if secrets::has(&host.alias) {
             password.set_text("");
-            password.set_tooltip_text(Some("Keyring'de kayitli parola var"));
+            password.set_tooltip_text(Some("A password is stored in the keyring"));
             forget.set_visible(true);
         }
 
         if host.source == Source::SshConfig {
             name.set_editable(false);
             name.set_tooltip_text(Some(
-                "~/.ssh/config icinde tanimli; adi orada degisir",
+                "Defined in ~/.ssh/config; rename it there",
             ));
         }
     }
@@ -191,7 +191,7 @@ pub fn present_in_folder<F>(
         forget.connect_clicked(move |button| {
             if let Some(alias) = &alias {
                 if let Err(error) = secrets::clear(alias) {
-                    eprintln!("runetty: parola silinemedi: {error}");
+                    eprintln!("runetty: could not clear password: {error}");
                     return;
                 }
             }
@@ -230,7 +230,7 @@ pub fn present_in_folder<F>(
 
         let alias = name.text().trim().to_string();
         if alias.is_empty() {
-            dialog.set_body("Name bos birakilamaz.");
+            dialog.set_body("Name cannot be empty.");
             return;
         }
 
@@ -252,7 +252,7 @@ pub fn present_in_folder<F>(
         let secret = password.text();
         if !secret.is_empty() {
             if let Err(error) = secrets::store(&alias, &secret) {
-                eprintln!("runetty: parola keyring'e yazilamadi: {error}");
+                eprintln!("runetty: could not store password in keyring: {error}");
             }
         }
 
@@ -264,7 +264,7 @@ pub fn present_in_folder<F>(
 
 fn choose_key(parent: &adw::AlertDialog, target: &adw::EntryRow) {
     let chooser = gtk::FileDialog::new();
-    chooser.set_title("SSH anahtari sec");
+    chooser.set_title("Choose an SSH key");
 
     if let Some(home) = dirs::home_dir() {
         let ssh = home.join(".ssh");
@@ -284,8 +284,8 @@ fn choose_key(parent: &adw::AlertDialog, target: &adw::EntryRow) {
     });
 }
 
-/// ~/.ssh altindaki ozel anahtarlar. Olcut: yaninda `.pub` esi olan dosya.
-/// Bu, `config`, `known_hosts` ve `.pub` dosyalarini dogal olarak eliyor.
+/// Private keys under ~/.ssh, identified by having a matching `.pub` file.
+/// That naturally filters out `config`, `known_hosts` and the `.pub` files.
 fn available_keys() -> Vec<String> {
     let Some(ssh) = dirs::home_dir().map(|home| home.join(".ssh")) else {
         return Vec::new();

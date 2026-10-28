@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# runetty gelistirme bagimliliklarini kurar ve surum tabanini dogrular.
-# Desteklenen paket yoneticileri: pacman, apt, dnf, zypper.
+# Installs runetty's build dependencies and verifies the version floor.
+# Supported package managers: pacman, apt, dnf, zypper.
 set -euo pipefail
 
 MIN_GTK=4.14
@@ -18,7 +18,7 @@ sudo_cmd() {
 }
 
 detect_family() {
-  [ -r /etc/os-release ] || die "/etc/os-release okunamadi."
+  [ -r /etc/os-release ] || die "cannot read /etc/os-release."
   # shellcheck disable=SC1091
   . /etc/os-release
   case " ${ID:-} ${ID_LIKE:-} " in
@@ -26,7 +26,7 @@ detect_family() {
     *" debian "*|*" ubuntu "*)                                echo debian ;;
     *" fedora "*|*" rhel "*|*" centos "*|*" rocky "*|*" almalinux "*) echo rhel ;;
     *" suse "*|*" opensuse "*)                                echo suse ;;
-    *) die "Taninmayan dagitim: ${ID:-bilinmiyor}. Paketleri elle kurun (bkz. BUILDING.md)." ;;
+    *) die "Unrecognised distribution: ${ID:-unknown}. Install packages manually (see BUILDING.md)." ;;
   esac
 }
 
@@ -38,8 +38,8 @@ install_arch() {
 
 install_debian() {
   sudo_cmd apt-get update
-  # rustc/cargo bilerek listede yok: Debian ve Ubuntu'nun paket surumu
-  # gtk4-rs'in istedigi Rust 1.92'nin cok altinda. rustup kullanilacak.
+  # rustc/cargo are deliberately absent: the Debian and Ubuntu packages are
+  # far below the Rust 1.92 that gtk4-rs needs. Use rustup instead.
   sudo_cmd apt-get install -y --no-install-recommends \
     build-essential pkg-config \
     libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libsecret-1-dev \
@@ -50,12 +50,12 @@ install_debian() {
 }
 
 install_rhel() {
-  # vte291-gtk4-devel Fedora'da var; RHEL/Rocky 9'da yok. EPEL de saglamiyor.
+  # vte291-gtk4-devel exists on Fedora but not RHEL/Rocky 9, nor in EPEL.
   sudo_cmd dnf install -y \
     gcc pkgconf-pkg-config \
     gtk4-devel libadwaita-devel libsecret-devel || true
   sudo_cmd dnf install -y vte291-gtk4-devel || \
-    warn "vte291-gtk4-devel bulunamadi; terminal destegi icin Flatpak kullanin."
+    warn "vte291-gtk4-devel not found; use Flatpak for terminal support."
 }
 
 install_suse() {
@@ -64,7 +64,7 @@ install_suse() {
     gtk4-devel libadwaita-devel vte-gtk4-devel libsecret-devel
 }
 
-# $1 modul, $2 asgari surum -> 0 uygun, 1 eski, 2 yok
+# $1 module, $2 minimum version -> 0 fine, 1 too old, 2 missing
 check() {
   local have
   have=$(pkg-config --modversion "$1" 2>/dev/null) || { echo "    $1: yok"; return 2; }
@@ -80,7 +80,7 @@ check_rust() {
   local have
   have=$(rustc --version 2>/dev/null | awk '{print $2}') || true
   if [ -z "${have:-}" ]; then
-    printf '    %-16s %s\n' rustc "yok"
+    printf '    %-16s %s\n' rustc "missing"
     return 1
   fi
   if printf '%s\n%s\n' "$MIN_RUST" "$have" | sort -V -C; then
@@ -94,7 +94,7 @@ check_rust() {
 main() {
   local family
   family=$(detect_family)
-  say "Dagitim ailesi: $family"
+  say "Distribution family: $family"
 
   case $family in
     arch)   install_arch ;;
@@ -103,7 +103,7 @@ main() {
     suse)   install_suse ;;
   esac
 
-  say "Surum kontrolu"
+  say "Version check"
   local ok=0
   check gtk4          "$MIN_GTK"    || ok=1
   check libadwaita-1  "$MIN_ADW"    || ok=1
@@ -113,14 +113,14 @@ main() {
   check_rust || ok=3
 
   case $ok in
-    0) say "Hazir:  cargo build --release" ;;
-    3) warn "Rust cok eski. Dagitim paketi yerine rustup kullanin:"
+    0) say "Ready:  cargo build --release" ;;
+    3) warn "Rust is too old. Use rustup rather than the distribution package:"
        warn "    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
        warn "    rustup default stable" ;;
-    2) warn "VTE yok ya da eski. Terminalsiz derleyin:"
+    2) warn "VTE is missing or too old. Build without the terminal:"
        warn "    cargo build --release --no-default-features"
-       warn "Tam surum icin Flatpak: flatpak install flathub dev.runetty.Runetty" ;;
-    *) die  "GTK ya da libadwaita cok eski. Bu dagitimda Flatpak kullanin (bkz. BUILDING.md)." ;;
+       warn "For the full build use Flatpak: flatpak install flathub dev.runetty.Runetty" ;;
+    *) die  "GTK or libadwaita is too old. Use Flatpak on this distribution (see BUILDING.md)." ;;
   esac
 }
 
