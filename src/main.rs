@@ -10,6 +10,14 @@ use gtk::{gio, glib};
 use config::{APP_ID, MIN_ADW, MIN_GTK, RESOURCE_PATH, VERSION};
 
 fn main() -> glib::ExitCode {
+    // ssh'in SSH_ASKPASS'i olarak cagrildik: parolayi keyring'den okuyup bas.
+    // GTK baslatmadan once, cunku burada pencere yok.
+    if std::env::args().any(|arg| arg == "--askpass")
+        || std::env::var_os("RUNETTY_ASKPASS_ALIAS").is_some()
+    {
+        return askpass();
+    }
+
     // Surum sorgulari ve kontrolu GTK baslatildiktan sonra guvenli.
     if let Err(error) = gtk::init() {
         eprintln!("runetty: GTK baslatilamadi: {error}");
@@ -98,6 +106,21 @@ fn check_runtime_versions() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// SSH_ASKPASS protokolu: parolayi stdout'a bas, baska hicbir sey yazma.
+fn askpass() -> glib::ExitCode {
+    let Ok(alias) = std::env::var("RUNETTY_ASKPASS_ALIAS") else {
+        return glib::ExitCode::FAILURE;
+    };
+
+    match data::secrets::lookup(&alias) {
+        Some(password) => {
+            println!("{password}");
+            glib::ExitCode::SUCCESS
+        }
+        None => glib::ExitCode::FAILURE,
+    }
 }
 
 /// `--bayrak deger` seklindeki argumani okur.

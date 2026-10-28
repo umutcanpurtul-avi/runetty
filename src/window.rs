@@ -32,13 +32,14 @@ pub fn build(
     let run: Rc<dyn Fn(&str)> = {
         let tabs = tabs.clone();
         let stack = content_stack.clone();
-        Rc::new(move |command: &str| open_tab(&tabs, &stack, command))
+        Rc::new(move |command: &str| open_tab(&tabs, &stack, command, None))
     };
 
     // Kayitli sunucu: zaman damgasi guncellenir, sonra komut calisir.
     let connect: Rc<dyn Fn(&str)> = {
         let store = Rc::clone(&store);
-        let run = Rc::clone(&run);
+        let tabs = tabs.clone();
+        let stack = content_stack.clone();
         let refresh: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
         let refresh_slot = Rc::clone(&refresh);
         REFRESH.with(|cell| *cell.borrow_mut() = Some(refresh_slot));
@@ -56,7 +57,7 @@ pub fn build(
                 }
             };
 
-            run(&command);
+            open_tab(&tabs, &stack, &command, Some(alias));
             if let Some(refresh) = refresh.borrow().as_ref() {
                 refresh();
             }
@@ -101,9 +102,12 @@ pub fn build(
     let header = adw::HeaderBar::new();
     header.add_css_class("runetty");
     header.set_title_widget(Some(&search));
-    header.pack_end(&icon_button("open-menu-symbolic", "Menu"));
-    header.pack_end(&icon_button("preferences-system-symbolic", "Preferences"));
-    header.pack_end(&icon_button("view-refresh-symbolic", "Reconnect"));
+
+    // Eylem dugmeleri kenar cubugunun ust barinda duruyor: orasi zaten bostu,
+    // icerik basliginda da arama alani tek basina ortada kaliyor.
+    sidebar.header.pack_end(&icon_button("open-menu-symbolic", "Menu"));
+    sidebar.header.pack_end(&icon_button("preferences-system-symbolic", "Preferences"));
+    sidebar.header.pack_end(&icon_button("view-refresh-symbolic", "Reconnect"));
 
     content_stack.set_vexpand(true);
     content_stack.add_named(&empty_page(&empty.widget), Some("empty"));
@@ -131,7 +135,7 @@ pub fn build(
     }
 
     if let Some(command) = exec {
-        open_tab(&tabs, &content_stack, command);
+        open_tab(&tabs, &content_stack, command, None);
     }
 
     window
@@ -165,8 +169,8 @@ fn tabs_page(tabs: &adw::TabView) -> gtk::Widget {
     page.upcast()
 }
 
-fn open_tab(tabs: &adw::TabView, stack: &gtk::Stack, command: &str) {
-    let child = terminal_widget(command);
+fn open_tab(tabs: &adw::TabView, stack: &gtk::Stack, command: &str, alias: Option<&str>) {
+    let child = terminal_widget(command, alias);
     let page = tabs.append(&child);
     page.set_title(&tab_title(command));
     tabs.set_selected_page(&page);
@@ -174,12 +178,12 @@ fn open_tab(tabs: &adw::TabView, stack: &gtk::Stack, command: &str) {
 }
 
 #[cfg(feature = "terminal")]
-fn terminal_widget(command: &str) -> gtk::Widget {
-    crate::ui::terminal::page(Some(command))
+fn terminal_widget(command: &str, alias: Option<&str>) -> gtk::Widget {
+    crate::ui::terminal::page(Some(command), alias)
 }
 
 #[cfg(not(feature = "terminal"))]
-fn terminal_widget(command: &str) -> gtk::Widget {
+fn terminal_widget(command: &str, _alias: Option<&str>) -> gtk::Widget {
     let label = gtk::Label::new(Some(&format!(
         "Terminal destegi bu derlemede kapali.\n{command}"
     )));

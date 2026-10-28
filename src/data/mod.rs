@@ -7,6 +7,7 @@
 //!
 //! Plandaki karar: baglanti alanlari ssh config'e, gorunum alanlari TOML'a.
 
+pub mod secrets;
 pub mod ssh_config;
 pub mod store;
 
@@ -27,6 +28,8 @@ pub struct Host {
     pub user: Option<String>,
     pub port: Option<u16>,
     pub folder: Option<String>,
+    /// `-i` ile gecilen ozel anahtar. ssh config'te `IdentityFile`.
+    pub identity_file: Option<String>,
     pub last_used: Option<u64>,
     pub source: Source,
 }
@@ -63,6 +66,9 @@ impl Host {
                         cmd.push_str(&format!("-p {port} "));
                     }
                 }
+                if let Some(identity) = &self.identity_file {
+                    cmd.push_str(&format!("-i {} ", shell_quote(identity)));
+                }
                 cmd.push_str(&self.user_host_plain());
                 cmd
             }
@@ -75,6 +81,11 @@ impl Host {
             None => self.hostname.clone(),
         }
     }
+}
+
+/// Dosya yolu bosluk ya da ozel karakter icerebilir; kabuga tek tirnakla gecir.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 pub fn now() -> u64 {

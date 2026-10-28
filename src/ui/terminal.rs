@@ -2,8 +2,8 @@
 //! vte-2.91-gtk4 bulunmayan dagitimlarda `--no-default-features` ile devre disi.
 
 use gtk::prelude::*;
-use vte::prelude::*;
 use gtk::{gdk, gio, glib, pango};
+use vte::prelude::*;
 
 const PALETTE: [&str; 16] = [
     "#0d0d12", "#f4766d", "#4ade80", "#e8a33d",
@@ -13,7 +13,8 @@ const PALETTE: [&str; 16] = [
 ];
 
 /// `command` bos ise kullanicinin kabugu acilir.
-pub fn page(command: Option<&str>) -> gtk::Widget {
+/// `alias` verilirse parola keyring'den SSH_ASKPASS uzerinden beslenir.
+pub fn page(command: Option<&str>, alias: Option<&str>) -> gtk::Widget {
     let term = vte::Terminal::new();
     term.add_css_class("terminal-page");
     term.set_hexpand(true);
@@ -30,10 +31,35 @@ pub fn page(command: Option<&str>) -> gtk::Widget {
         .unwrap_or_else(|| "/bin/bash".to_string());
 
     let argv: Vec<String> = match command {
-        Some(cmd) => vec![shell, "-lc".into(), format!("{cmd}; exec $SHELL")],
+        // Komut bitince kullaniciyi sessizce yerel kabuga dusurmek yerine
+        // cikis kodunu goster ve sekmeyi acik tut.
+        Some(cmd) => vec![
+            "/bin/sh".into(),
+            "-c".into(),
+            format!(
+                "{cmd}; status=$?; printf '\\n\\033[2m[runetty] cikis kodu %s — \
+                 kapatmak icin Enter\\033[0m\\n' \"$status\"; read _",
+                cmd = cmd
+            ),
+        ],
         None => vec![shell, "-l".into()],
     };
     let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
+
+    // ssh parola sordugunda SSH_ASKPASS'i calistirir ve stdout'undan okur.
+    // Kendi binary'mizi askpass olarak veriyoruz; keyring'den okuyup basiyor.
+    let env: Vec<String> = match alias {
+        Some(alias) if crate::data::secrets::has(alias) => match std::env::current_exe() {
+            Ok(exe) => vec![
+                format!("SSH_ASKPASS={}", exe.display()),
+                "SSH_ASKPASS_REQUIRE=force".to_string(),
+                format!("RUNETTY_ASKPASS_ALIAS={alias}"),
+            ],
+            Err(_) => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    let env: Vec<&str> = env.iter().map(String::as_str).collect();
 
     let home = glib::home_dir();
 
@@ -41,7 +67,7 @@ pub fn page(command: Option<&str>) -> gtk::Widget {
         vte::PtyFlags::DEFAULT,
         home.to_str(),
         &argv,
-        &[],
+        &env,
         glib::SpawnFlags::DEFAULT,
         || {},
         -1,

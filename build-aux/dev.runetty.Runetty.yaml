@@ -3,8 +3,8 @@
 # (Rocky 9'da GTK 4.6, Arch'ta 4.20+). Runtime bunu sabitler.
 #
 # Derleme:
-#   flatpak install -y flathub org.gnome.Platform//48 org.gnome.Sdk//48 \
-#       org.freedesktop.Sdk.Extension.rust-stable//24.08
+#   flatpak install -y flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
+#       org.freedesktop.Sdk.Extension.rust-stable//25.08
 #   python3 build-aux/flatpak-cargo-generator.py Cargo.lock -o build-aux/cargo-sources.json
 #   flatpak-builder --user --install --force-clean build build-aux/dev.runetty.Runetty.yaml
 #
@@ -12,7 +12,7 @@
 
 id: dev.runetty.Runetty
 runtime: org.gnome.Platform
-runtime-version: '48'
+runtime-version: '50'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
@@ -34,6 +34,8 @@ finish-args:
   - --filesystem=~/.ssh
   - --filesystem=home
   - --talk-name=org.freedesktop.Notifications
+  # Parolalar sistem keyring'inde; Secret Service erisimi gerekli.
+  - --talk-name=org.freedesktop.secrets
 
 modules:
   # GNOME runtime'inin vte surumu degisebiliyor; kendi surumumuzu sabitliyoruz.

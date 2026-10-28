@@ -35,6 +35,8 @@ struct LocalHost {
     port: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     folder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    identity_file: Option<String>,
 }
 
 pub struct Store {
@@ -85,6 +87,7 @@ impl Store {
                 user: local.user.clone(),
                 port: local.port,
                 folder: local.folder.clone(),
+                identity_file: local.identity_file.clone(),
                 last_used: self.file.last_used.get(&local.alias).copied(),
                 source: Source::Local,
             });
@@ -116,6 +119,7 @@ impl Store {
             user: host.user,
             port: host.port,
             folder: host.folder,
+            identity_file: host.identity_file,
         };
 
         match self.file.hosts.iter_mut().find(|h| h.alias == entry.alias) {
@@ -143,6 +147,8 @@ impl Store {
 
         self.file.last_used.remove(alias);
         self.file.folders.remove(alias);
+        // Kayit gidiyorsa keyring'de parolasi kalmasin.
+        let _ = super::secrets::clear(alias);
         self.save();
         deleted
     }
@@ -192,6 +198,7 @@ pub struct LocalInput {
     pub user: Option<String>,
     pub port: Option<u16>,
     pub folder: Option<String>,
+    pub identity_file: Option<String>,
 }
 
 fn config_path() -> Option<PathBuf> {

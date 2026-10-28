@@ -37,16 +37,16 @@ Matristeki surumler dagitimlarin kendi paket arsivlerinden dogrulandi
 ## Flatpak (her dagitim)
 
 ```bash
-flatpak install -y flathub org.gnome.Platform//48 org.gnome.Sdk//48 \
-    org.freedesktop.Sdk.Extension.rust-stable//24.08
-pip install --user aiohttp toml   # flatpak-cargo-generator icin
+flatpak install -y flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
+    org.freedesktop.Sdk.Extension.rust-stable//25.08
+pip install --user aiohttp toml tomlkit   # flatpak-cargo-generator icin
 curl -LO https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
 python3 flatpak-cargo-generator.py Cargo.lock -o build-aux/cargo-sources.json
 flatpak-builder --user --install --force-clean build build-aux/dev.runetty.Runetty.yaml
 flatpak run dev.runetty.Runetty
 ```
 
-Runtime GNOME 48'e sabitli: her dagitimda ayni GTK 4.18 / libadwaita 1.7.
+Runtime GNOME 50'ye sabitli: her dagitimda ayni GTK 4.20 / libadwaita 1.8.
 VTE manifest icinde 0.78.4 olarak derleniyor, dagitimin surumune bakilmiyor.
 
 ## Yerel derleme
@@ -73,10 +73,32 @@ Rocky 10 ve benzeri sistemlerde gorsel uzerinde calismak icin yeterli.
 
 | Aile | Paketler |
 | --- | --- |
-| Arch | `base-devel pkgconf rust gtk4 libadwaita vte4 inter-font ttf-jetbrains-mono` |
-| Debian / Ubuntu | `build-essential pkg-config cargo rustc libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev fonts-inter fonts-jetbrains-mono` |
-| Fedora / RHEL | `gcc pkgconf-pkg-config cargo rust gtk4-devel libadwaita-devel vte291-gtk4-devel` |
-| openSUSE | `gcc pkg-config cargo rust gtk4-devel libadwaita-devel vte-gtk4-devel` |
+| Arch | `base-devel pkgconf rust gtk4 libadwaita vte4 libsecret inter-font ttf-jetbrains-mono` |
+| Debian / Ubuntu | `build-essential pkg-config libgtk-4-dev libadwaita-1-dev libvte-2.91-gtk4-dev libsecret-1-dev fonts-inter fonts-jetbrains-mono` |
+| Fedora / RHEL | `gcc pkgconf-pkg-config gtk4-devel libadwaita-devel libsecret-devel vte291-gtk4-devel` |
+| openSUSE | `gcc pkg-config gtk4-devel libadwaita-devel vte-gtk4-devel libsecret-devel` |
+
+### Rust surumu
+
+**Rust 1.92 ya da ustu gerekiyor** (gtk4-sys'in MSRV'si). Debian, Ubuntu ve RHEL'in
+paket `rustc`'si bunun altinda kaldigi icin paket listelerinde yok — rustup kullanin:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup default stable
+```
+
+Arch'ta dagitim paketi guncel; Flatpak'te `rust-stable` SDK eklentisi hallediyor.
+
+## Parolalar
+
+Kaydedilen parolalar sistem keyring'ine (Secret Service) yazilir — GNOME Keyring
+ya da KDE'de KWallet. `hosts.toml`'a ya da baska bir dosyaya duz metin parola
+yazilmaz. Baglanirken parola ssh'a `SSH_ASKPASS` uzerinden verilir, yani komut
+satirinda hicbir zaman gorunmez ve `sshpass` gibi bir araca gerek kalmaz.
+
+Keyring calismiyorsa (ornegin kwallet/gnome-keyring kapaliysa) parola kaydedilemez;
+uygulama bunu soyler ve ssh parolayi her zamanki gibi terminalde sorar.
 
 ## Yazi tipleri
 

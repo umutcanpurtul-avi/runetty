@@ -53,6 +53,7 @@ fn parse(text: &str, origin: &Path, depth: u8) -> Vec<Host> {
                     user: None,
                     port: None,
                     folder: None,
+                    identity_file: None,
                     last_used: None,
                     source: Source::SshConfig,
                 });
@@ -65,6 +66,11 @@ fn parse(text: &str, origin: &Path, depth: u8) -> Vec<Host> {
             "user" => {
                 if let Some(host) = current.as_mut() {
                     host.user = Some(value.to_string());
+                }
+            }
+            "identityfile" => {
+                if let Some(host) = current.as_mut() {
+                    host.identity_file = Some(expand_tilde(value));
                 }
             }
             "port" => {
@@ -112,6 +118,15 @@ fn split_directive(line: &str) -> Option<(&str, &str)> {
         None
     } else {
         Some((key, rest))
+    }
+}
+
+fn expand_tilde(value: &str) -> String {
+    match value.strip_prefix("~/") {
+        Some(rest) => dirs::home_dir()
+            .map(|home| home.join(rest).to_string_lossy().into_owned())
+            .unwrap_or_else(|| value.to_string()),
+        None => value.to_string(),
     }
 }
 

@@ -15,6 +15,9 @@ use crate::data::Host;
 
 pub struct Sidebar {
     pub widget: adw::ToolbarView,
+    /// Kenar cubugunun ust bari. Pencere eylemleri buraya yerlesiyor:
+    /// basliktaki bos alani kullaniyor ve arama alanini ortada yalniz birakiyor.
+    pub header: adw::HeaderBar,
     stack: gtk::Stack,
     sessions: gtk::Box,
     store: Rc<RefCell<Store>>,
@@ -173,15 +176,16 @@ pub fn build(store: Rc<RefCell<Store>>, connect: Rc<dyn Fn(&str)>) -> Rc<Sidebar
     view.set_bottom_bar_style(adw::ToolbarStyle::Flat);
 
     // Kenar cubugunun ustunde baslik yok; pencereyi surukleyebilmek icin bos bar.
-    let handle = adw::HeaderBar::new();
-    handle.set_show_title(false);
-    handle.set_show_end_title_buttons(false);
-    handle.add_css_class("flat");
-    view.add_top_bar(&handle);
+    let header = adw::HeaderBar::new();
+    header.set_show_title(false);
+    header.set_show_end_title_buttons(false);
+    header.add_css_class("flat");
+    view.add_top_bar(&header);
     view.set_content(Some(&stack));
 
     let sidebar = Rc::new(Sidebar {
         widget: view,
+        header,
         stack,
         sessions,
         store,
