@@ -10,8 +10,9 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use crate::data::sessions::{self, Sessions};
+use crate::data::settings::Settings;
 use crate::data::store::Store;
-use crate::ui::{empty_state, host_dialog, icon_rail, sidebar};
+use crate::ui::{empty_state, host_dialog, icon_rail, preferences, sidebar};
 
 pub fn build(
     app: &adw::Application,
@@ -20,6 +21,7 @@ pub fn build(
     autoconnect: Option<&str>,
     context_menu: Option<&str>,
     edit: Option<&str>,
+    action: Option<&str>,
 ) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
         .application(app)
@@ -32,7 +34,15 @@ pub fn build(
     let store = Rc::new(RefCell::new(Store::load()));
     let live = Sessions::new();
     let content_stack = gtk::Stack::new();
-    let tabs = Tabs::new(adw::TabView::new(), content_stack.clone(), Rc::clone(&live));
+    let settings = Rc::new(RefCell::new(Settings::load()));
+    crate::apply_user_css(&settings.borrow().appearance.css());
+
+    let tabs = Tabs::new(
+        adw::TabView::new(),
+        content_stack.clone(),
+        Rc::clone(&live),
+        Rc::clone(&settings),
+    );
 
     // Ham komut: bos durumun komut alanindan gelir, bir kayda bagli degil.
     let run: Rc<dyn Fn(&str)> = {
@@ -128,9 +138,31 @@ pub fn build(
     header.add_css_class("runetty");
     header.set_title_widget(Some(&search));
 
-    header.pack_end(&icon_button("open-menu-symbolic", "Menu"));
-    header.pack_end(&icon_button("preferences-system-symbolic", "Preferences"));
-    header.pack_end(&icon_button("view-refresh-symbolic", "Reconnect"));
+    let app_menu = gio::Menu::new();
+    app_menu.append(Some("Preferences"), Some("win.preferences"));
+    app_menu.append(Some("New Session"), Some("win.host-new"));
+    app_menu.append(Some("New Folder"), Some("win.folder-new"));
+    app_menu.append(Some("Reload ~/.ssh/config"), Some("win.reload-ssh-config"));
+    app_menu.append(Some("Restore Hidden"), Some("win.restore-hidden"));
+    app_menu.append(Some("Quit"), Some("app.quit"));
+
+    let menu_button = gtk::MenuButton::new();
+    menu_button.set_icon_name("open-menu-symbolic");
+    menu_button.set_tooltip_text(Some("Menu"));
+    menu_button.add_css_class("flat");
+    menu_button.set_menu_model(Some(&app_menu));
+
+    header.pack_end(&menu_button);
+    header.pack_end(&action_button(
+        "preferences-system-symbolic",
+        "Preferences",
+        "win.preferences",
+    ));
+    header.pack_end(&action_button(
+        "view-refresh-symbolic",
+        "Reconnect",
+        "win.reconnect",
+    ));
 
     content_stack.set_vexpand(true);
     content_stack.add_named(&empty_page(&empty.widget), Some("empty"));
@@ -142,17 +174,23 @@ pub fn build(
     content_view.set_content(Some(&content_stack));
     split.set_content(Some(&content_view));
 
-    window.set_content(Some(&split));
+    // Toast'lar icin tek bir katman; geri bildirim buradan geciyor.
+    let toasts = adw::ToastOverlay::new();
+    toasts.set_child(Some(&split));
+    window.set_content(Some(&toasts));
 
-    install_actions(
-        &window,
-        &split,
-        &search,
-        &store,
-        &connect,
-        &connect_new,
-        &refresh,
-    );
+    install_actions(Wiring {
+        window: &window,
+        split: &split,
+        search: &search,
+        store: &store,
+        settings: &settings,
+        tabs: &tabs,
+        command_for: &command_for,
+        connect: &connect,
+        connect_new: &connect_new,
+        refresh: &refresh,
+    });
 
     // Son sekme kapaninca bos duruma geri don.
     {
@@ -175,6 +213,19 @@ pub fn build(
                 None => connect(alias),
             }
         }
+    }
+
+    // Parametresiz bir pencere eylemini tetikler; dogrulama icin.
+    if let Some(name) = action.map(str::to_string) {
+        let window = window.clone();
+        glib::idle_add_local_once(move || {
+            gtk::prelude::WidgetExt::activate_action(
+                &window,
+                &format!("win.{name}"),
+                None,
+            )
+            .ok();
+        });
     }
 
     if let Some(alias) = edit.map(str::to_string) {
@@ -241,11 +292,55 @@ struct Tabs {
     /// acilabiliyor; odaklanma en son acilana gider.
     open: RefCell<HashMap<String, Vec<adw::TabPage>>>,
     live: Rc<Sessions>,
+    settings: Rc<RefCell<Settings>>,
 }
 
 impl Tabs {
-    fn new(view: adw::TabView, stack: gtk::Stack, live: Rc<Sessions>) -> Rc<Self> {
-        Rc::new(Self { view, stack, open: RefCell::new(HashMap::new()), live })
+    fn new(
+        view: adw::TabView,
+        stack: gtk::Stack,
+        live: Rc<Sessions>,
+        settings: Rc<RefCell<Settings>>,
+    ) -> Rc<Self> {
+        Rc::new(Self {
+            view,
+            stack,
+            open: RefCell::new(HashMap::new()),
+            live,
+            settings,
+        })
+    }
+
+    /// Acik sekmelerin terminal fontunu yeni ayara gore tazeler.
+    #[cfg(feature = "terminal")]
+    fn restyle(&self) {
+        let font = self.settings.borrow().appearance.terminal_pango();
+        for index in 0..self.view.n_pages() {
+            let page = self.view.nth_page(index);
+            crate::ui::terminal::restyle(&page.child(), &font);
+        }
+    }
+
+    #[cfg(not(feature = "terminal"))]
+    fn restyle(&self) {}
+
+    /// Secili sekmeyi kapatip ayni sunucuya yeniden baglanir.
+    fn reconnect(self: &Rc<Self>, command_for: &Rc<dyn Fn(&str) -> Option<String>>) -> bool {
+        let Some(page) = self.view.selected_page() else { return false };
+
+        let alias = self
+            .open
+            .borrow()
+            .iter()
+            .find(|(_, pages)| pages.contains(&page))
+            .map(|(alias, _)| alias.clone());
+
+        let Some(alias) = alias else { return false };
+        let Some(command) = command_for(&alias) else { return false };
+
+        self.view.close_page(&page);
+        self.spawn(&command, Some(&alias));
+        true
     }
 
     fn mark(&self, alias: &str, state: sessions::State) {
@@ -318,7 +413,9 @@ impl Tabs {
         let owned = alias.map(str::to_string);
         let this = Rc::clone(self);
 
-        crate::ui::terminal::page(Some(command), alias, move |status| {
+        let font = self.settings.borrow().appearance.terminal_pango();
+
+        crate::ui::terminal::page(Some(command), alias, &font, move |status| {
             if let Some(alias) = &owned {
                 // Sekme hala acik ama komut bitti: baglanti dustu.
                 this.mark(
@@ -356,95 +453,118 @@ fn tab_title(command: &str) -> String {
         })
 }
 
-fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
+fn action_button(icon: &str, tooltip: &str, action: &str) -> gtk::Button {
     let button = gtk::Button::from_icon_name(icon);
     button.set_tooltip_text(Some(tooltip));
     button.add_css_class("flat");
+    button.set_action_name(Some(action));
     button
 }
 
-fn install_actions(
-    window: &adw::ApplicationWindow,
-    split: &adw::OverlaySplitView,
-    search: &gtk::SearchEntry,
-    store: &Rc<RefCell<Store>>,
-    connect: &Rc<dyn Fn(&str)>,
-    connect_new: &Rc<dyn Fn(&str)>,
-    refresh: &Rc<dyn Fn()>,
-) {
+/// Eylem kurulumunun ihtiyaci olan parcalar. Ayri ayri parametre olarak
+/// tasimak imzayi okunmaz hale getiriyordu.
+struct Wiring<'a> {
+    window: &'a adw::ApplicationWindow,
+    split: &'a adw::OverlaySplitView,
+    search: &'a gtk::SearchEntry,
+    store: &'a Rc<RefCell<Store>>,
+    settings: &'a Rc<RefCell<Settings>>,
+    tabs: &'a Rc<Tabs>,
+    command_for: &'a Rc<dyn Fn(&str) -> Option<String>>,
+    connect: &'a Rc<dyn Fn(&str)>,
+    connect_new: &'a Rc<dyn Fn(&str)>,
+    refresh: &'a Rc<dyn Fn()>,
+}
+
+fn install_actions(w: Wiring) {
+    let window = w.window;
+
+    let add = |action: &gio::SimpleAction| window.add_action(action);
+
     let focus_search = gio::SimpleAction::new("global-search", None);
     {
-        let search = search.clone();
+        let search = w.search.clone();
         focus_search.connect_activate(move |_, _| {
             search.grab_focus();
         });
     }
-    window.add_action(&focus_search);
+    add(&focus_search);
 
     let toggle_sidebar = gio::SimpleAction::new("toggle-sidebar", None);
     {
-        let split = split.clone();
+        let split = w.split.clone();
         toggle_sidebar.connect_activate(move |_, _| {
             split.set_show_sidebar(!split.shows_sidebar());
         });
     }
-    window.add_action(&toggle_sidebar);
+    add(&toggle_sidebar);
 
     let string = Some(glib::VariantTy::STRING);
 
     // Sag tik menusu: alias eylemin hedefi olarak geliyor.
     let host_connect = gio::SimpleAction::new("host-connect", string);
     {
-        let connect = Rc::clone(connect);
+        let connect = Rc::clone(w.connect);
         host_connect.connect_activate(move |_, target| {
             if let Some(alias) = target.and_then(glib::Variant::str) {
                 connect(alias);
             }
         });
     }
-    window.add_action(&host_connect);
+    add(&host_connect);
 
     let host_connect_new = gio::SimpleAction::new("host-connect-new", string);
     {
-        let connect_new = Rc::clone(connect_new);
+        let connect_new = Rc::clone(w.connect_new);
         host_connect_new.connect_activate(move |_, target| {
             if let Some(alias) = target.and_then(glib::Variant::str) {
                 connect_new(alias);
             }
         });
     }
-    window.add_action(&host_connect_new);
+    add(&host_connect_new);
 
     let host_edit = gio::SimpleAction::new("host-edit", string);
     {
         let window = window.clone();
-        let store = Rc::clone(store);
-        let refresh = Rc::clone(refresh);
+        let store = Rc::clone(w.store);
+        let refresh = Rc::clone(w.refresh);
         host_edit.connect_activate(move |_, target| {
             let alias = target.and_then(glib::Variant::str).map(str::to_string);
             let refresh = Rc::clone(&refresh);
             host_dialog::present(&window, Rc::clone(&store), alias, move || refresh());
         });
     }
-    window.add_action(&host_edit);
+    add(&host_edit);
 
     let host_new = gio::SimpleAction::new("host-new", None);
     {
         let window = window.clone();
-        let store = Rc::clone(store);
-        let refresh = Rc::clone(refresh);
+        let store = Rc::clone(w.store);
+        let refresh = Rc::clone(w.refresh);
         host_new.connect_activate(move |_, _| {
             let refresh = Rc::clone(&refresh);
             host_dialog::present(&window, Rc::clone(&store), None, move || refresh());
         });
     }
-    window.add_action(&host_new);
+    add(&host_new);
+
+    let folder_new = gio::SimpleAction::new("folder-new", None);
+    {
+        let window = window.clone();
+        let store = Rc::clone(w.store);
+        let refresh = Rc::clone(w.refresh);
+        folder_new.connect_activate(move |_, _| {
+            new_folder(&window, Rc::clone(&store), Rc::clone(&refresh));
+        });
+    }
+    add(&folder_new);
 
     let host_delete = gio::SimpleAction::new("host-delete", string);
     {
         let window = window.clone();
-        let store = Rc::clone(store);
-        let refresh = Rc::clone(refresh);
+        let store = Rc::clone(w.store);
+        let refresh = Rc::clone(w.refresh);
         host_delete.connect_activate(move |_, target| {
             let Some(alias) = target.and_then(glib::Variant::str).map(str::to_string) else {
                 return;
@@ -452,34 +572,107 @@ fn install_actions(
             confirm_delete(&window, Rc::clone(&store), alias, Rc::clone(&refresh));
         });
     }
-    window.add_action(&host_delete);
+    add(&host_delete);
+
+    let reconnect = gio::SimpleAction::new("reconnect", None);
+    {
+        let tabs = Rc::clone(w.tabs);
+        let command_for = Rc::clone(w.command_for);
+        let window = window.clone();
+        reconnect.connect_activate(move |_, _| {
+            if !tabs.reconnect(&command_for) {
+                toast(&window, "Yeniden baglanacak bir oturum yok");
+            }
+        });
+    }
+    add(&reconnect);
+
+    let prefs = gio::SimpleAction::new("preferences", None);
+    {
+        let window = window.clone();
+        let settings = Rc::clone(w.settings);
+        let tabs = Rc::clone(w.tabs);
+        prefs.connect_activate(move |_, _| {
+            let settings_for_apply = Rc::clone(&settings);
+            let tabs = Rc::clone(&tabs);
+            preferences::present(&window, Rc::clone(&settings), move || {
+                crate::apply_user_css(&settings_for_apply.borrow().appearance.css());
+                tabs.restyle();
+            });
+        });
+    }
+    add(&prefs);
 
     let reload = gio::SimpleAction::new("reload-ssh-config", None);
     {
-        let store = Rc::clone(store);
-        let refresh = Rc::clone(refresh);
+        let store = Rc::clone(w.store);
+        let refresh = Rc::clone(w.refresh);
         reload.connect_activate(move |_, _| {
             store.borrow_mut().reload_ssh_config();
             refresh();
         });
     }
-    window.add_action(&reload);
+    add(&reload);
 
     let restore = gio::SimpleAction::new("restore-hidden", None);
     {
-        let store = Rc::clone(store);
-        let refresh = Rc::clone(refresh);
+        let store = Rc::clone(w.store);
+        let refresh = Rc::clone(w.refresh);
         restore.connect_activate(move |_, _| {
             store.borrow_mut().unhide_all();
             refresh();
         });
     }
-    window.add_action(&restore);
+    add(&restore);
 
-    // Faz 2'de doldurulacak.
     let palette = gio::SimpleAction::new("command-palette", None);
     palette.connect_activate(|_, _| glib::g_debug!("runetty", "TODO: command palette"));
-    window.add_action(&palette);
+    add(&palette);
+}
+
+fn toast(window: &adw::ApplicationWindow, text: &str) {
+    match window.content().and_downcast::<adw::ToastOverlay>() {
+        Some(overlay) => overlay.add_toast(adw::Toast::new(text)),
+        None => eprintln!("runetty: {text}"),
+    }
+}
+
+/// Bos klasor olusturur; icine sunucu, kayit diyalogundan secilerek girer.
+fn new_folder(
+    window: &adw::ApplicationWindow,
+    store: Rc<RefCell<Store>>,
+    refresh: Rc<dyn Fn()>,
+) {
+    let entry = adw::EntryRow::new();
+    entry.set_title("Folder name");
+
+    let group = adw::PreferencesGroup::new();
+    group.add(&entry);
+
+    let dialog = adw::AlertDialog::new(Some("New Folder"), None);
+    dialog.set_extra_child(Some(&group));
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("create", "Create");
+    dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("create"));
+    dialog.set_close_response("cancel");
+
+    dialog.connect_response(None, move |dialog, response| {
+        if response != "create" {
+            return;
+        }
+
+        let name = entry.text().trim().to_string();
+        if name.is_empty() {
+            dialog.set_body("Klasor adi bos birakilamaz.");
+            return;
+        }
+
+        store.borrow_mut().add_folder(&name);
+        refresh();
+    });
+
+    dialog.present(Some(window));
 }
 
 /// Silme geri alinamadigi icin onay sart; ssh config kaydinda ne oldugunu da

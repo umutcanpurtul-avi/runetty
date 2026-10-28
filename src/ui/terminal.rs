@@ -18,7 +18,12 @@ const PALETTE: [&str; 16] = [
 /// `command` bos ise kullanicinin kabugu acilir.
 /// `alias` verilirse parola keyring'den SSH_ASKPASS uzerinden beslenir.
 /// `on_status` komut bitince cikis koduyla cagrilir; durum noktasi buna bakar.
-pub fn page<F>(command: Option<&str>, alias: Option<&str>, on_status: F) -> gtk::Widget
+pub fn page<F>(
+    command: Option<&str>,
+    alias: Option<&str>,
+    font: &str,
+    on_status: F,
+) -> gtk::Widget
 where
     F: Fn(i32) + 'static,
 {
@@ -30,9 +35,7 @@ where
     term.set_hexpand(true);
     term.set_vexpand(true);
     term.set_scrollback_lines(10_000);
-    term.set_font(Some(&pango::FontDescription::from_string(
-        "JetBrains Mono 11",
-    )));
+    term.set_font(Some(&pango::FontDescription::from_string(font)));
 
     apply_colors(&term);
 
@@ -110,6 +113,20 @@ where
     scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
     scroller.set_child(Some(&term));
     scroller.upcast()
+}
+
+/// Acik sekmelerin fontunu yerinde degistirir.
+pub fn restyle(root: &gtk::Widget, font: &str) {
+    if let Ok(term) = root.clone().downcast::<vte::Terminal>() {
+        term.set_font(Some(&pango::FontDescription::from_string(font)));
+        return;
+    }
+
+    let mut child = root.first_child();
+    while let Some(widget) = child {
+        restyle(&widget, font);
+        child = widget.next_sibling();
+    }
 }
 
 fn apply_colors(term: &vte::Terminal) {

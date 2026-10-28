@@ -66,19 +66,27 @@ impl Sidebar {
         }
 
         let all: Vec<Host> = store.hosts().into_iter().filter(|host| matches(host)).collect();
+        let any_folder = !store.folders().is_empty();
         drop(store);
 
         self.sessions.append(&rows::section_header("Servers"));
 
-        if all.is_empty() {
+        if all.is_empty() && !any_folder {
             self.sessions.append(&empty_hint(&needle));
             return;
         }
 
-        let mut folders: Vec<String> =
-            all.iter().filter_map(|host| host.folder.clone()).collect();
-        folders.sort();
-        folders.dedup();
+        // Bos klasorler de gorunur: kullanici once klasoru olusturup
+        // sonra icine sunucu ekleyebilsin.
+        let folders = if needle.is_empty() {
+            self.store.borrow().folders()
+        } else {
+            let mut used: Vec<String> =
+                all.iter().filter_map(|host| host.folder.clone()).collect();
+            used.sort();
+            used.dedup();
+            used
+        };
 
         for folder in folders {
             let inside: Vec<Host> = all
@@ -91,9 +99,14 @@ impl Sidebar {
             let label = gtk::Label::new(Some(&folder));
             label.add_css_class("folder-label");
             expander.set_label_widget(Some(&label));
+            attach_folder_menu(&label, &folder, self);
             expander.set_expanded(true);
             expander.set_margin_start(6);
-            expander.set_child(Some(&self.host_list(&inside)));
+            expander.set_child(Some(&if inside.is_empty() {
+                empty_folder_hint().upcast::<gtk::Widget>()
+            } else {
+                self.host_list(&inside).upcast::<gtk::Widget>()
+            }));
             self.sessions.append(&expander);
         }
 
@@ -200,6 +213,52 @@ fn context_menu(alias: &str) -> gio::Menu {
         menu.append_item(&item);
     }
     menu
+}
+
+/// Klasor basligina sag tik: silme. Klasor yalnizca bir etiket oldugu icin
+/// silmek sunuculari silmez, sadece gruptan cikarir.
+fn attach_folder_menu(label: &gtk::Label, folder: &str, sidebar: &Rc<Sidebar>) {
+    let gesture = gtk::GestureClick::new();
+    gesture.set_button(gtk::gdk::BUTTON_SECONDARY);
+
+    let folder = folder.to_string();
+    let sidebar = Rc::clone(sidebar);
+    gesture.connect_pressed(move |_, _, _, _| {
+        let dialog = adw::AlertDialog::new(
+            Some("Delete Folder"),
+            Some(&format!(
+                "\"{folder}\" klasoru kaldirilsin mi? Icindeki sunucular silinmez, \
+                 yalnizca gruptan cikar."
+            )),
+        );
+        dialog.add_response("cancel", "Cancel");
+        dialog.add_response("delete", "Delete");
+        dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+        dialog.set_close_response("cancel");
+
+        let parent = sidebar.widget.clone();
+        let owner = Rc::clone(&sidebar);
+        let name = folder.clone();
+        dialog.connect_response(None, move |_, response| {
+            if response == "delete" {
+                owner.store.borrow_mut().remove_folder(&name);
+                owner.refresh();
+            }
+        });
+
+        dialog.present(Some(&parent));
+    });
+
+    label.add_controller(gesture);
+}
+
+fn empty_folder_hint() -> gtk::Label {
+    let label = gtk::Label::new(Some("Bos — Edit ile bir sunucuyu buraya tasiyin"));
+    label.set_xalign(0.0);
+    label.set_margin_start(18);
+    label.set_margin_bottom(4);
+    label.add_css_class("row-meta");
+    label
 }
 
 fn empty_hint(needle: &str) -> gtk::Label {

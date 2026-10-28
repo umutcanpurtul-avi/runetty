@@ -21,6 +21,10 @@ struct File {
     /// ssh config'ten gelen kayitlara runetty'nin ekledigi klasor.
     #[serde(default)]
     folders: HashMap<String, String>,
+    /// Henuz bos olan klasorler. Icine sunucu girince de burada kalirlar,
+    /// boylece son sunucu tasinsa bile klasor kaybolmuyor.
+    #[serde(default)]
+    empty_folders: Vec<String>,
     #[serde(default, rename = "host")]
     hosts: Vec<LocalHost>,
 }
@@ -107,13 +111,35 @@ impl Store {
     }
 
 
-    /// Daha once kullanilmis klasor adlari; diyalogdaki oneri listesi.
+    /// Bilinen klasor adlari: kullanilanlar + elle olusturulmus bos olanlar.
     pub fn folders(&self) -> Vec<String> {
         let mut names: Vec<String> =
             self.hosts().into_iter().filter_map(|host| host.folder).collect();
+        names.extend(self.file.empty_folders.iter().cloned());
         names.sort_by_key(|name| name.to_lowercase());
         names.dedup();
         names
+    }
+
+    pub fn add_folder(&mut self, name: &str) {
+        let name = name.trim();
+        if name.is_empty() || self.folders().iter().any(|known| known == name) {
+            return;
+        }
+
+        self.file.empty_folders.push(name.to_string());
+        self.save();
+    }
+
+    pub fn remove_folder(&mut self, name: &str) {
+        self.file.empty_folders.retain(|folder| folder != name);
+        for host in self.file.hosts.iter_mut() {
+            if host.folder.as_deref() == Some(name) {
+                host.folder = None;
+            }
+        }
+        self.file.folders.retain(|_, folder| folder != name);
+        self.save();
     }
 
     pub fn touch(&mut self, alias: &str) {
@@ -210,15 +236,19 @@ pub struct LocalInput {
     pub identity_file: Option<String>,
 }
 
-fn config_path() -> Option<PathBuf> {
-    // Flatpak icinde XDG_CONFIG_HOME sandbox'in kendi dizinini gosterir.
-    // Kayitlari yerel kurulumla paylasmak icin host'un ~/.config'ini
-    // acikca kullaniyoruz; manifest bu yola izin veriyor.
+/// Flatpak icinde XDG_CONFIG_HOME sandbox'in kendi dizinini gosterir.
+/// Ayarlari yerel kurulumla paylasmak icin host'un ~/.config'ini acikca
+/// kullaniyoruz; manifest bu yola izin veriyor.
+pub fn config_dir() -> Option<PathBuf> {
     let base = if std::path::Path::new("/.flatpak-info").exists() {
         dirs::home_dir()?.join(".config")
     } else {
         dirs::config_dir()?
     };
 
-    Some(base.join("runetty/hosts.toml"))
+    Some(base.join("runetty"))
+}
+
+fn config_path() -> Option<PathBuf> {
+    config_dir().map(|dir| dir.join("hosts.toml"))
 }

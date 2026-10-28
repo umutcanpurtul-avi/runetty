@@ -52,6 +52,7 @@ fn main() -> glib::ExitCode {
     let autoconnect = argument_value("--connect");
     let context_menu = argument_value("--context-menu");
     let edit = argument_value("--edit");
+    let action = argument_value("--action");
 
     // Gelistirme bayraklari acik bir pencere varken de ise yaramali;
     // tek-instance davranisi bunlari calisan surece devredip yutuyor.
@@ -60,6 +61,7 @@ fn main() -> glib::ExitCode {
         || autoconnect.is_some()
         || context_menu.is_some()
         || edit.is_some()
+        || action.is_some()
     {
         gio::ApplicationFlags::NON_UNIQUE
     } else {
@@ -90,6 +92,7 @@ fn main() -> glib::ExitCode {
                 autoconnect.as_deref(),
                 context_menu.as_deref(),
                 edit.as_deref(),
+                action.as_deref(),
             );
         window.present();
         if let Some(path) = screenshot.clone() {
@@ -147,6 +150,26 @@ fn argument_value(flag: &str) -> Option<String> {
         }
     }
     None
+}
+
+thread_local! {
+    /// Ayarlardan gelen font katmani. style.css'in ustunde duruyor,
+    /// boylece tasarim tokenlari dosyada kalirken tercih ezebiliyor.
+    static USER_CSS: gtk::CssProvider = gtk::CssProvider::new();
+}
+
+pub fn apply_user_css(css: &str) {
+    USER_CSS.with(|provider| {
+        provider.load_from_string(css);
+
+        if let Some(display) = gtk::gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                provider,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 1,
+            );
+        }
+    });
 }
 
 fn load_stylesheet() {
