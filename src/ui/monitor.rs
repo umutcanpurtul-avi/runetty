@@ -691,9 +691,10 @@ fn memory_panel(detail: &metrics::Detail) -> gtk::Widget {
         "0 B".to_string()
     } else {
         format!(
-            "{} / {}",
+            "{} / {} ({:.0}%)",
             metrics::human_kb(detail.swap_total_kb - detail.swap_free_kb),
-            metrics::human_kb(detail.swap_total_kb)
+            metrics::human_kb(detail.swap_total_kb),
+            detail.swap_percent()
         )
     };
 
@@ -888,79 +889,7 @@ fn no_data() -> gtk::Label {
     label
 }
 
-fn panel(title: &str, rows: &[(&str, String)]) -> gtk::Widget {
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    column.append(&super::rows::section_header(title));
 
-    for (label, value) in rows {
-        let line = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-
-        let name = gtk::Label::new(Some(label));
-        name.set_xalign(0.0);
-        name.set_hexpand(true);
-        name.add_css_class("row-subtitle");
-
-        let data = gtk::Label::new(Some(value));
-        data.set_xalign(1.0);
-        data.add_css_class("row-subtitle");
-        data.add_css_class("mono");
-
-        line.append(&name);
-        line.append(&data);
-        column.append(&line);
-    }
-
-    column.upcast()
-}
-
-/// Ucuncu sutun bos birakilabiliyor; disk tablosunda basliksiz yuzde duruyor.
-fn table(title: &str, headers: &[&str; 3], rows: &[(String, String, String)]) -> gtk::Widget {
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    column.append(&super::rows::section_header(title));
-
-    if rows.is_empty() {
-        let empty = gtk::Label::new(Some("no data"));
-        empty.set_xalign(0.0);
-        empty.add_css_class("row-meta");
-        column.append(&empty);
-        return column.upcast();
-    }
-
-    let grid = gtk::Grid::new();
-    grid.set_column_spacing(16);
-    grid.set_row_spacing(2);
-    grid.set_hexpand(true);
-
-    for (index, header) in headers.iter().enumerate() {
-        if header.is_empty() {
-            continue;
-        }
-        let label = gtk::Label::new(Some(header));
-        label.set_xalign(if index == 0 { 0.0 } else { 1.0 });
-        label.add_css_class("row-meta");
-        if index == 0 {
-            label.set_hexpand(true);
-        }
-        grid.attach(&label, index as i32, 0, 1, 1);
-    }
-
-    for (row, (first, second, third)) in rows.iter().enumerate() {
-        for (index, value) in [first, second, third].iter().enumerate() {
-            let label = gtk::Label::new(Some(value));
-            label.set_xalign(if index == 0 { 0.0 } else { 1.0 });
-            label.add_css_class("row-subtitle");
-            label.add_css_class("mono");
-            label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-            if index == 0 {
-                label.set_hexpand(true);
-            }
-            grid.attach(&label, index as i32, row as i32 + 1, 1, 1);
-        }
-    }
-
-    column.append(&grid);
-    column.upcast()
-}
 
 fn gauge(ring: &Ring, reading: &gtk::Label, label: &str) -> gtk::Box {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 4);

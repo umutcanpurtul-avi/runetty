@@ -7,6 +7,7 @@
 //!
 //! Per the plan: connection fields belong in ssh config, presentation in TOML.
 
+pub mod agents;
 pub mod hostkey;
 pub mod metrics;
 pub mod secrets;
@@ -106,6 +107,14 @@ impl Host {
             Some(user) => format!("{user}@{}", self.hostname),
             None => self.hostname.clone(),
         }
+    }
+}
+
+pub(crate) fn quote_if_needed(value: &str) -> String {
+    if needs_quoting(value) {
+        shell_quote(value)
+    } else {
+        value.to_string()
     }
 }
 

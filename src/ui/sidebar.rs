@@ -8,7 +8,6 @@ use adw::prelude::*;
 use gtk::gio;
 
 use super::icon_rail::Mode;
-use super::model::AGENTS;
 use super::rows;
 use crate::data::sessions::Sessions;
 use crate::data::store::Store;
@@ -450,6 +449,7 @@ fn empty_hint(needle: &str) -> gtk::Label {
 pub fn build(
     store: Rc<RefCell<Store>>,
     live: Rc<Sessions>,
+    agents_page: &gtk::Widget,
     connect: Rc<dyn Fn(&str)>,
     connect_new: Rc<dyn Fn(&str)>,
 ) -> Rc<Sidebar> {
@@ -460,7 +460,7 @@ pub fn build(
 
     let sessions = gtk::Box::new(gtk::Orientation::Vertical, 0);
     stack.add_named(&scrolled(&sessions), Some(Mode::Sessions.id()));
-    stack.add_named(&agents_page(), Some(Mode::Agents.id()));
+    stack.add_named(agents_page, Some(Mode::Agents.id()));
 
     let view = adw::ToolbarView::new();
     view.add_css_class("sidebar-pane");
@@ -510,21 +510,6 @@ fn scrolled(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
     sw
 }
 
-fn agents_page() -> gtk::Widget {
-    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    page.append(&rows::section_header("Agents"));
-
-    let list = gtk::ListBox::new();
-    list.set_selection_mode(gtk::SelectionMode::Single);
-    for agent in AGENTS {
-        let row = gtk::ListBoxRow::new();
-        row.set_child(Some(&rows::agent_row(agent)));
-        list.append(&row);
-    }
-    page.append(&list);
-
-    scrolled(&page).upcast()
-}
 
 
 fn footer(sidebar: &Rc<Sidebar>) -> gtk::Box {

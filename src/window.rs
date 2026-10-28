@@ -13,7 +13,8 @@ use crate::data::sessions::{self, Sessions};
 use crate::data::settings::{Settings, Theme};
 use crate::data::store::Store;
 use crate::ui::{
-    empty_state, host_dialog, icon_rail, monitor, preferences, sidebar, trust_dialog,
+    agents, empty_state, host_dialog, icon_rail, monitor, preferences, sidebar,
+    trust_dialog,
 };
 
 pub fn build(
@@ -147,9 +148,13 @@ pub fn build(
         })
     };
 
+    // Attaching to a tmux session is just another command in a tab.
+    let agents = agents::build(Rc::clone(&store), Rc::clone(&run));
+
     let sidebar = sidebar::build(
         Rc::clone(&store),
         Rc::clone(&live),
+        &agents.widget,
         Rc::clone(&connect),
         Rc::clone(&connect_new),
     );
@@ -199,6 +204,7 @@ pub fn build(
     let rail = icon_rail::build(mode, {
         let sidebar = Rc::clone(&sidebar);
         let monitor = Rc::clone(&monitor);
+        let agents = Rc::clone(&agents);
         let stack = content_stack.clone();
         let tabs = Rc::clone(&tabs);
         let current_mode = Rc::clone(&current_mode);
@@ -207,6 +213,7 @@ pub fn build(
         move |mode| {
             sidebar.set_mode(mode);
             current_mode.set(mode);
+            agents.set_active(mode == icon_rail::Mode::Agents);
 
             if mode == icon_rail::Mode::Monitor {
                 // If pinned it belongs in the pane; put it back if it fell out.
@@ -336,6 +343,10 @@ pub fn build(
     }
 
     // The pin preference is kept across sessions.
+    if mode == icon_rail::Mode::Agents {
+        agents.set_active(true);
+    }
+
     if settings.borrow().layout.monitor_pinned {
         monitor.set_pinned(true);
         let monitor = Rc::clone(&monitor);

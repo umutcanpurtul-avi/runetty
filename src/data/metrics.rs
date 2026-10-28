@@ -413,6 +413,16 @@ pub struct Process {
     pub name: String,
 }
 
+impl Detail {
+    pub fn swap_percent(&self) -> f64 {
+        if self.swap_total_kb == 0 {
+            return 0.0;
+        }
+        let used = self.swap_total_kb.saturating_sub(self.swap_free_kb);
+        used as f64 * 100.0 / self.swap_total_kb as f64
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Detail {
     pub sample: Sample,
@@ -422,16 +432,6 @@ pub struct Detail {
     pub disks: Vec<Disk>,
     pub interfaces: Vec<Interface>,
     pub processes: Vec<Process>,
-}
-
-impl Detail {
-    pub fn swap_percent(&self) -> f64 {
-        if self.swap_total_kb == 0 {
-            return 0.0;
-        }
-        let used = self.swap_total_kb.saturating_sub(self.swap_free_kb);
-        used as f64 * 100.0 / self.swap_total_kb as f64
-    }
 }
 
 pub fn parse_detail(output: &str) -> Option<Detail> {

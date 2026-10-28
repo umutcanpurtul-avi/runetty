@@ -3,7 +3,6 @@
 
 use gtk::prelude::*;
 
-use super::model::Agent;
 use crate::data::sessions::State;
 use crate::data::{self, Host};
 
@@ -74,8 +73,3 @@ pub fn host_row(host: &Host, state: State) -> gtk::Box {
     two_layer(&host.alias, &host.user_host(), Some(dot.upcast()), when.upcast())
 }
 
-pub fn agent_row(agent: &Agent) -> gtk::Box {
-    let dot = status_dot(agent.state.css());
-    let badge = badge(agent.state.label(), agent.state.css());
-    two_layer(agent.name, agent.host, Some(dot.upcast()), badge.upcast())
-}

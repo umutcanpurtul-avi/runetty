@@ -57,10 +57,7 @@ impl Default for Appearance {
 }
 
 impl Appearance {
-    /// Pango description, e.g. "Inter 13". An empty family defers to the theme.
-    pub fn interface_pango(&self) -> String {
-        format!("{} {}", self.family(&self.interface_font, "sans"), self.interface_size)
-    }
+
 
     pub fn terminal_pango(&self) -> String {
         format!("{} {}", self.family(&self.terminal_font, "monospace"), self.terminal_size)
