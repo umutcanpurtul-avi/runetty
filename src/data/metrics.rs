@@ -290,19 +290,53 @@ DISK
     /// No previous sample on the first round: no value rather than zero.
     #[test]
     fn cpu_needs_two_samples() {
-        let current = CpuTimes { total: 1000, idle: 850 };
+        let current = CpuTimes { total: 1000, idle: 850, ..CpuTimes::default() };
         assert_eq!(cpu_percent(None, current), None);
 
-        let previous = CpuTimes { total: 900, idle: 800 };
+        let previous = CpuTimes { total: 900, idle: 800, ..CpuTimes::default() };
         let percent = cpu_percent(Some(previous), current).unwrap();
         assert!((percent - 50.0).abs() < 0.01, "got {percent}");
+    }
+
+    /// The breakdown must add up and reflect the per-field deltas.
+    #[test]
+    fn breakdown_splits_the_delta() {
+        let previous = CpuTimes {
+            total: 1000, idle: 800, user: 100, system: 50, iowait: 20, steal: 10,
+        };
+        let current = CpuTimes {
+            total: 2000, idle: 1400, user: 300, system: 150, iowait: 60, steal: 90,
+        };
+
+        let breakdown = cpu_breakdown(Some(previous), current).unwrap();
+
+        assert!((breakdown.user - 20.0).abs() < 0.01, "user {}", breakdown.user);
+        assert!((breakdown.system - 10.0).abs() < 0.01);
+        assert!((breakdown.steal - 8.0).abs() < 0.01);
+        assert!((breakdown.idle - 60.0).abs() < 0.01);
+        assert!((breakdown.busy() - 40.0).abs() < 0.01);
+    }
+
+    /// Rates need two readings and a time gap; a counter reset must read zero.
+    #[test]
+    fn rates_come_from_two_readings() {
+        let before = Interface { name: "eth0".into(), rx_bytes: 1_000, tx_bytes: 2_000 };
+        let after = Interface { name: "eth0".into(), rx_bytes: 3_048, tx_bytes: 2_000 };
+
+        let measured = rate(&before, &after, 2.0);
+        assert!((measured.rx - 1024.0).abs() < 0.01);
+        assert_eq!(measured.tx, 0.0);
+        assert_eq!(human_rate(measured.rx), "1 kB/s");
+
+        let reset = Interface { name: "eth0".into(), rx_bytes: 10, tx_bytes: 10 };
+        assert_eq!(rate(&after, &reset, 2.0).rx, 0.0);
     }
 
     /// Counters reset when a host reboots; the delta must not go negative.
     #[test]
     fn counter_reset_is_not_a_negative_percentage() {
-        let previous = CpuTimes { total: 5000, idle: 4000 };
-        let current = CpuTimes { total: 100, idle: 90 };
+        let previous = CpuTimes { total: 5000, idle: 4000, ..CpuTimes::default() };
+        let current = CpuTimes { total: 100, idle: 90, ..CpuTimes::default() };
         assert_eq!(cpu_percent(Some(previous), current), None);
     }
 }

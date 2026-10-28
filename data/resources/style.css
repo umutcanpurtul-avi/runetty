@@ -459,7 +459,7 @@ button.folder-action:hover {
 }
 
 .gauge-value {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: @fg_secondary;
 }
@@ -484,3 +484,28 @@ button.folder-action:hover {
 .content-bg.pinned {
   border-left: 1px solid @hairline;
 }
+
+/* --- panel meters --- */
+
+.panel-figure {
+  font-size: 12px;
+  font-weight: 600;
+  color: @fg_secondary;
+}
+
+levelbar.meter trough {
+  min-height: 4px;
+  border-radius: 999px;
+  background-color: alpha(#ffffff, 0.07);
+  border: none;
+}
+
+levelbar.meter block.filled {
+  min-height: 4px;
+  border-radius: 999px;
+  background-color: @fg_secondary;
+  border: none;
+}
+
+levelbar.meter-warn  block.filled { background-color: @state_blocked; }
+levelbar.meter-alert block.filled { background-color: @state_closed; }

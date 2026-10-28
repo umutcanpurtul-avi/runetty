@@ -7,7 +7,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
@@ -26,8 +26,11 @@ struct Card {
     detail: gtk::Revealer,
     detail_body: gtk::Box,
     expanded: Cell<bool>,
-    detail_busy: Cell<bool>,
     stacked: Rc<Cell<bool>>,
+    /// Previous interface counters and when they were read, so rates can be
+    /// derived. Counters alone only say "how much since boot".
+    traffic: RefCell<Option<(Vec<metrics::Interface>, Instant)>>,
+    network: gtk::Label,
     alias: String,
     command: Vec<String>,
     rings: [Ring; 3],
@@ -104,7 +107,7 @@ impl Monitor {
         if changed {
             for card in self.cards.borrow().values() {
                 if card.expanded.get() {
-                    load_detail(card);
+                    refresh_detail(card);
                 }
             }
         }
@@ -119,7 +122,7 @@ impl Monitor {
         card.expanded.set(true);
         card.detail.set_reveal_child(true);
         card.widget.add_css_class("expanded");
-        load_detail(&card);
+        refresh_detail(&card);
     }
 
     /// Called from outside when the watch list changes.
@@ -168,7 +171,7 @@ impl Monitor {
                 card.rings.iter().zip(card.readings.iter()).zip(values)
             {
                 ring.set_value(Some(value));
-                reading.set_text(&format!("{value:.0}"));
+                reading.set_text(&format!("{value:.0}%"));
             }
             card.summary.set_text("up 5d 13:52 · 4c · 5.8 GB");
             card.error.set_visible(false);
@@ -187,16 +190,39 @@ impl Monitor {
             }
             card.busy.set(true);
 
+            // An expanded card asks for the detail probe, which already
+            // contains everything the summary needs: one call, not two.
+            let expanded = card.expanded.get();
+            let command = if expanded {
+                card.detail_command.clone()
+            } else {
+                card.command.clone()
+            };
+
             glib::spawn_future_local(async move {
-                let result = run(&card.command, &card.alias).await;
+                let result = run(&command, &card.alias).await;
                 card.busy.set(false);
 
-                match result {
-                    Ok(output) => match metrics::parse(&output) {
+                let output = match result {
+                    Ok(output) => output,
+                    Err(message) => return card.fail(&message),
+                };
+
+                if expanded {
+                    match metrics::parse_detail(&output) {
+                        Some(detail) => {
+                            // Read before apply() overwrites it.
+                            let previous_cpu = card.previous.get();
+                            card.apply(detail.sample.clone());
+                            card.apply_detail(&detail, previous_cpu);
+                        }
+                        None => card.fail("unexpected response"),
+                    }
+                } else {
+                    match metrics::parse(&output) {
                         Some(sample) => card.apply(sample),
                         None => card.fail("unexpected response"),
-                    },
-                    Err(message) => card.fail(&message),
+                    }
                 }
             });
         }
@@ -204,6 +230,65 @@ impl Monitor {
 }
 
 impl Card {
+    /// Rebuilds the detail panels from a fresh reading. Panels are recreated
+    /// rather than patched in place: at one round every two seconds the cost
+    /// is invisible, and it keeps the layout code in a single place.
+    /// `previous_cpu` must be the reading from before `apply` ran, or the
+    /// delta collapses to zero and the breakdown comes out empty.
+    fn apply_detail(
+        self: &Rc<Self>,
+        detail: &metrics::Detail,
+        previous_cpu: Option<metrics::CpuTimes>,
+    ) {
+        let rates = self.rates(&detail.interfaces);
+        self.update_network_summary(&rates);
+
+        let body = &self.detail_body;
+        while let Some(child) = body.first_child() {
+            body.remove(&child);
+        }
+
+        body.append(&detail_columns(detail, &rates, previous_cpu, self.stacked.get()));
+    }
+
+    /// Converts counters into per-second rates using the previous reading.
+    fn rates(&self, interfaces: &[metrics::Interface]) -> Vec<(String, metrics::Rate)> {
+        let now = Instant::now();
+        let previous = self.traffic.replace(Some((interfaces.to_vec(), now)));
+
+        let Some((before, at)) = previous else {
+            return interfaces.iter().map(|i| (i.name.clone(), metrics::Rate::default())).collect();
+        };
+
+        let seconds = now.duration_since(at).as_secs_f64();
+        interfaces
+            .iter()
+            .map(|current| {
+                let rate = before
+                    .iter()
+                    .find(|old| old.name == current.name)
+                    .map(|old| metrics::rate(old, current, seconds))
+                    .unwrap_or_default();
+                (current.name.clone(), rate)
+            })
+            .collect()
+    }
+
+    fn update_network_summary(&self, rates: &[(String, metrics::Rate)]) {
+        let total = rates.iter().fold(metrics::Rate::default(), |mut acc, (_, rate)| {
+            acc.rx += rate.rx;
+            acc.tx += rate.tx;
+            acc
+        });
+
+        self.network.set_text(&format!(
+            "↓ {}\n↑ {}",
+            metrics::human_rate(total.rx),
+            metrics::human_rate(total.tx)
+        ));
+        self.network.set_visible(true);
+    }
+
     fn apply(&self, sample: metrics::Sample) {
         self.error.set_visible(false);
         self.gauges.set_visible(true);
@@ -217,7 +302,7 @@ impl Card {
         {
             ring.set_value(value);
             reading.set_text(&match value {
-                Some(value) => format!("{value:.0}"),
+                Some(value) => format!("{value:.0}%"),
                 None => "–".into(),
             });
         }
@@ -233,6 +318,7 @@ impl Card {
         }
 
         self.summary.set_text("");
+        self.network.set_visible(false);
         self.gauges.set_visible(false);
         self.error_text.set_text(&format!("[!] {reason}"));
         self.error.set_visible(true);
@@ -319,6 +405,14 @@ fn build_card(host: &Host, stacked: Rc<Cell<bool>>) -> Card {
     identity.append(&target);
     identity.append(&summary);
 
+    // Live network summary beside the rings, as a rate rather than a total.
+    let network = gtk::Label::new(None);
+    network.set_xalign(0.0);
+    network.set_valign(gtk::Align::Center);
+    network.set_visible(false);
+    network.add_css_class("row-subtitle");
+    network.add_css_class("mono");
+
     let gauges = gtk::Box::new(gtk::Orientation::Horizontal, 14);
     gauges.set_valign(gtk::Align::Center);
     gauges.set_halign(gtk::Align::End);
@@ -353,6 +447,7 @@ fn build_card(host: &Host, stacked: Rc<Cell<bool>>) -> Card {
     error.append(&retry);
 
     header.append(&identity);
+    header.append(&network);
     header.append(&gauges);
     header.append(&error);
 
@@ -373,7 +468,8 @@ fn build_card(host: &Host, stacked: Rc<Cell<bool>>) -> Card {
         detail,
         detail_body,
         expanded: Cell::new(false),
-        detail_busy: Cell::new(false),
+        traffic: RefCell::new(None),
+        network: network.clone(),
         stacked,
         alias: host.alias.clone(),
         command: metrics::probe_args(host),
@@ -427,32 +523,38 @@ fn attach_expander(card: &Rc<Card>) {
 
         if open {
             card.widget.add_css_class("expanded");
-            load_detail(&card);
+            refresh_detail(&card);
         } else {
             card.widget.remove_css_class("expanded");
         }
     });
 }
 
-fn load_detail(card: &Rc<Card>) {
-    if card.detail_busy.get() {
+/// Fetches the detail straight away, without waiting for the next round.
+/// Used when a card is expanded and when pinning changes the layout.
+fn refresh_detail(card: &Rc<Card>) {
+    if card.busy.get() {
         return;
     }
-    card.detail_busy.set(true);
+    card.busy.set(true);
 
     let card = Rc::clone(card);
+    let command = card.detail_command.clone();
     glib::spawn_future_local(async move {
-        let result = run(&card.detail_command, &card.alias).await;
-        card.detail_busy.set(false);
-
-        let body = &card.detail_body;
-        while let Some(child) = body.first_child() {
-            body.remove(&child);
-        }
+        let result = run(&command, &card.alias).await;
+        card.busy.set(false);
 
         match result.ok().and_then(|output| metrics::parse_detail(&output)) {
-            Some(detail) => body.append(&detail_columns(&detail, card.stacked.get())),
+            Some(detail) => {
+                let previous_cpu = card.previous.get();
+                card.apply(detail.sample.clone());
+                card.apply_detail(&detail, previous_cpu);
+            }
             None => {
+                let body = &card.detail_body;
+                while let Some(child) = body.first_child() {
+                    body.remove(&child);
+                }
                 let label = gtk::Label::new(Some("Could not fetch detail."));
                 label.set_xalign(0.0);
                 label.add_css_class("row-meta");
@@ -470,133 +572,320 @@ fn load_detail(card: &Rc<Card>) {
 /// In a narrow pane (pinned Monitor) the columns stack instead.
 /// Panels are spread across two columns:
 ///   CPU     | MEMORY
-///   DISK    | TOP PROCESSES
-///   NETWORK |
-/// The left column holds short fixed rows, the right one the growing tables.
-fn detail_columns(detail: &metrics::Detail, stacked: bool) -> gtk::Widget {
-    let (left_panels, right_panels) = detail_panels(detail);
+///   DISK    | NETWORK INTERFACES
+///            TOP PROCESSES
+/// A pinned pane is narrow, so the columns stack there.
+fn detail_columns(
+    detail: &metrics::Detail,
+    rates: &[(String, metrics::Rate)],
+    previous_cpu: Option<metrics::CpuTimes>,
+    stacked: bool,
+) -> gtk::Widget {
+    let sample = &detail.sample;
 
     let left = gtk::Box::new(gtk::Orientation::Vertical, 14);
     left.set_hexpand(true);
-    for panel in left_panels {
-        left.append(&panel);
-    }
+    left.append(&cpu_panel(detail, previous_cpu));
+    left.append(&disk_panel(detail));
 
     let right = gtk::Box::new(gtk::Orientation::Vertical, 14);
     right.set_hexpand(true);
-    for panel in right_panels {
-        right.append(&panel);
-    }
+    right.append(&memory_panel(detail));
+    right.append(&network_panel(detail, rates));
 
-    // A pinned pane is narrow, so the columns stack there. The split is driven
-    // by the pin state rather than a breakpoint: AdwBreakpointBin does not
-    // propagate its child's size request, which clipped the detail to the
-    // minimum height and let the next card overlap it.
     let columns = gtk::Box::new(
-        if stacked {
-            gtk::Orientation::Vertical
-        } else {
-            gtk::Orientation::Horizontal
-        },
+        if stacked { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal },
         if stacked { 14 } else { 28 },
     );
     columns.set_homogeneous(!stacked);
     columns.append(&left);
     columns.append(&right);
 
-    columns.upcast()
+    // Process rows are long; they get the full width underneath.
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 14);
+    page.append(&columns);
+    page.append(&process_panel(detail));
+
+    let _ = sample;
+    page.upcast()
 }
 
-fn detail_panels(detail: &metrics::Detail) -> (Vec<gtk::Widget>, Vec<gtk::Widget>) {
-    let sample = &detail.sample;
+/// A panel header with the headline figure on the right and a meter below.
+fn panel_head(title: &str, value: &str, fraction: f64) -> gtk::Box {
+    let head = gtk::Box::new(gtk::Orientation::Horizontal, 8);
 
-    let cpu = panel(
+    let name = gtk::Label::new(Some(title));
+    name.set_xalign(0.0);
+    name.set_hexpand(true);
+    name.add_css_class("section-header");
+
+    let figure = gtk::Label::new(Some(value));
+    figure.set_xalign(1.0);
+    figure.add_css_class("panel-figure");
+
+    head.append(&name);
+    head.append(&figure);
+
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    column.append(&head);
+    column.append(&meter(fraction));
+    column
+}
+
+/// A thin bar; the threshold class is set here, the colour in style.css.
+fn meter(fraction: f64) -> gtk::LevelBar {
+    let bar = gtk::LevelBar::new();
+    bar.set_min_value(0.0);
+    bar.set_max_value(100.0);
+    bar.set_value(fraction.clamp(0.0, 100.0));
+    bar.add_css_class("meter");
+
+    if fraction >= 85.0 {
+        bar.add_css_class("meter-alert");
+    } else if fraction >= 60.0 {
+        bar.add_css_class("meter-warn");
+    }
+
+    bar
+}
+
+fn cpu_panel(detail: &metrics::Detail, previous: Option<metrics::CpuTimes>) -> gtk::Widget {
+    let sample = &detail.sample;
+    let breakdown = metrics::cpu_breakdown(previous, sample.cpu);
+
+    let busy = breakdown.map(|b| b.busy());
+    let column = panel_head(
         "CPU",
-        &[
-            ("Cores", format!("{}", sample.cores)),
-            ("Load (1/5/15)", format!(
-                "{:.2} · {:.2} · {:.2}",
-                detail.load[0], detail.load[1], detail.load[2]
-            )),
-            ("Uptime", sample.uptime_text()),
-        ],
+        &busy.map(|v| format!("{v:.0}%")).unwrap_or_else(|| "–".into()),
+        busy.unwrap_or(0.0),
     );
 
+    let mut rows: Vec<(&str, String)> = Vec::new();
+    if let Some(breakdown) = breakdown {
+        rows.push(("User", format!("{:.1}%", breakdown.user)));
+        rows.push(("System", format!("{:.1}%", breakdown.system)));
+        rows.push(("IO Wait", format!("{:.1}%", breakdown.iowait)));
+        rows.push(("Steal", format!("{:.1}%", breakdown.steal)));
+        rows.push(("Idle", format!("{:.1}%", breakdown.idle)));
+    }
+
+    rows.push(("Cores", sample.cores.to_string()));
+    rows.push((
+        "Load 1 / 5 / 15",
+        format!("{:.2} / {:.2} / {:.2}", detail.load[0], detail.load[1], detail.load[2]),
+    ));
+    rows.push(("Uptime", sample.uptime_text()));
+
+    column.append(&rows_box(&rows));
+    column.upcast()
+}
+
+fn memory_panel(detail: &metrics::Detail) -> gtk::Widget {
+    let sample = &detail.sample;
+    let used = sample.mem_total_kb.saturating_sub(sample.mem_available_kb);
+    let percent = sample.memory_percent();
+
+    let column = panel_head("MEMORY", &format!("{percent:.0}%"), percent);
+
     let swap = if detail.swap_total_kb == 0 {
-        "none".to_string()
+        "0 B".to_string()
     } else {
         format!(
-            "{} / {} ({:.0}%)",
+            "{} / {}",
             metrics::human_kb(detail.swap_total_kb - detail.swap_free_kb),
-            metrics::human_kb(detail.swap_total_kb),
-            detail.swap_percent()
+            metrics::human_kb(detail.swap_total_kb)
         )
     };
 
-    let memory = panel(
-        "MEMORY",
-        &[
-            ("Used", format!(
-                "{} / {} ({:.0}%)",
-                metrics::human_kb(sample.mem_total_kb - sample.mem_available_kb),
-                metrics::human_kb(sample.mem_total_kb),
-                sample.memory_percent()
-            )),
-            ("Swap", swap),
-        ],
-    );
+    column.append(&rows_box(&[
+        ("Total", metrics::human_kb(sample.mem_total_kb)),
+        ("Used", metrics::human_kb(used)),
+        ("Free", metrics::human_kb(sample.mem_free_kb)),
+        ("Page Cache", metrics::human_kb(sample.mem_cached_kb)),
+        ("Available", metrics::human_kb(sample.mem_available_kb)),
+        ("Swap", swap),
+    ]));
+    column.upcast()
+}
 
-    let disks: Vec<(String, String, String)> = detail
-        .disks
-        .iter()
-        .map(|disk| {
-            (
-                disk.mount.clone(),
-                format!(
-                    "{} / {}",
-                    metrics::human_kb(disk.used_kb),
-                    metrics::human_kb(disk.total_kb)
-                ),
-                format!("{:.0}%", disk.used_percent),
-            )
-        })
-        .collect();
+fn disk_panel(detail: &metrics::Detail) -> gtk::Widget {
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    column.append(&super::rows::section_header("DISK"));
 
-    let network: Vec<(String, String, String)> = detail
-        .interfaces
-        .iter()
-        .map(|interface| {
-            (
-                interface.name.clone(),
-                format!("↓ {}", metrics::human_kb(interface.rx_bytes / 1024)),
-                format!("↑ {}", metrics::human_kb(interface.tx_bytes / 1024)),
-            )
-        })
-        .collect();
+    if detail.disks.is_empty() {
+        column.append(&no_data());
+        return column.upcast();
+    }
 
-    let processes: Vec<(String, String, String)> = detail
-        .processes
-        .iter()
-        .map(|process| {
-            (
-                format!("{} ({})", process.name, process.pid),
-                format!("{:.1}% cpu", process.cpu),
-                format!("{:.1}% mem", process.mem),
-            )
-        })
-        .collect();
+    for disk in &detail.disks {
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 8);
 
-    (
-        vec![
-            cpu,
-            table("DISK", &["Mount point", "Usage", ""], &disks),
-            table("NETWORK", &["Interface", "Received", "Sent"], &network),
-        ],
-        vec![
-            memory,
-            table("TOP PROCESSES", &["Process", "CPU", "Memory"], &processes),
-        ],
-    )
+        let mount = gtk::Label::new(Some(&disk.mount));
+        mount.set_xalign(0.0);
+        mount.set_hexpand(true);
+        mount.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+        mount.add_css_class("row-subtitle");
+        mount.add_css_class("mono");
+
+        let size = gtk::Label::new(Some(&format!(
+            "{} / {}",
+            metrics::human_kb(disk.used_kb),
+            metrics::human_kb(disk.total_kb)
+        )));
+        size.set_xalign(1.0);
+        size.add_css_class("row-subtitle");
+        size.add_css_class("mono");
+
+        line.append(&mount);
+        line.append(&size);
+
+        let entry = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        entry.append(&line);
+        entry.append(&meter(disk.used_percent));
+        column.append(&entry);
+    }
+
+    column.upcast()
+}
+
+fn network_panel(
+    detail: &metrics::Detail,
+    rates: &[(String, metrics::Rate)],
+) -> gtk::Widget {
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    column.append(&super::rows::section_header("NETWORK INTERFACES"));
+
+    if detail.interfaces.is_empty() {
+        column.append(&no_data());
+        return column.upcast();
+    }
+
+    let grid = gtk::Grid::new();
+    grid.set_column_spacing(14);
+    grid.set_row_spacing(2);
+    grid.set_hexpand(true);
+
+    for (index, header) in ["INTERFACE", "RX", "TX", "RX TOTAL", "TX TOTAL"].iter().enumerate() {
+        let label = gtk::Label::new(Some(header));
+        label.set_xalign(if index == 0 { 0.0 } else { 1.0 });
+        label.add_css_class("row-meta");
+        if index == 0 {
+            label.set_hexpand(true);
+        }
+        grid.attach(&label, index as i32, 0, 1, 1);
+    }
+
+    for (row, interface) in detail.interfaces.iter().enumerate() {
+        let rate = rates
+            .iter()
+            .find(|(name, _)| name == &interface.name)
+            .map(|(_, rate)| *rate)
+            .unwrap_or_default();
+
+        let cells = [
+            interface.name.clone(),
+            metrics::human_rate(rate.rx),
+            metrics::human_rate(rate.tx),
+            metrics::human_kb(interface.rx_bytes / 1024),
+            metrics::human_kb(interface.tx_bytes / 1024),
+        ];
+
+        for (index, value) in cells.iter().enumerate() {
+            let label = gtk::Label::new(Some(value));
+            label.set_xalign(if index == 0 { 0.0 } else { 1.0 });
+            label.add_css_class("row-subtitle");
+            label.add_css_class("mono");
+            label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            if index == 0 {
+                label.set_hexpand(true);
+            }
+            grid.attach(&label, index as i32, row as i32 + 1, 1, 1);
+        }
+    }
+
+    column.append(&grid);
+    column.upcast()
+}
+
+fn process_panel(detail: &metrics::Detail) -> gtk::Widget {
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    column.append(&super::rows::section_header("TOP PROCESSES"));
+
+    if detail.processes.is_empty() {
+        column.append(&no_data());
+        return column.upcast();
+    }
+
+    let grid = gtk::Grid::new();
+    grid.set_column_spacing(14);
+    grid.set_row_spacing(2);
+    grid.set_hexpand(true);
+
+    for (index, header) in ["PID", "COMMAND", "CPU", "MEM"].iter().enumerate() {
+        let label = gtk::Label::new(Some(header));
+        label.set_xalign(if index <= 1 { 0.0 } else { 1.0 });
+        label.add_css_class("row-meta");
+        if index == 1 {
+            label.set_hexpand(true);
+        }
+        grid.attach(&label, index as i32, 0, 1, 1);
+    }
+
+    for (row, process) in detail.processes.iter().enumerate() {
+        let cells = [
+            process.pid.to_string(),
+            process.name.clone(),
+            format!("{:.1}%", process.cpu),
+            format!("{:.1}%", process.mem),
+        ];
+
+        for (index, value) in cells.iter().enumerate() {
+            let label = gtk::Label::new(Some(value));
+            label.set_xalign(if index <= 1 { 0.0 } else { 1.0 });
+            label.add_css_class("row-subtitle");
+            label.add_css_class("mono");
+            if index == 1 {
+                label.set_hexpand(true);
+                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                label.set_tooltip_text(Some(value));
+            }
+            grid.attach(&label, index as i32, row as i32 + 1, 1, 1);
+        }
+    }
+
+    column.append(&grid);
+    column.upcast()
+}
+
+fn rows_box(rows: &[(&str, String)]) -> gtk::Box {
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 2);
+
+    for (label, value) in rows {
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+
+        let name = gtk::Label::new(Some(label));
+        name.set_xalign(0.0);
+        name.set_hexpand(true);
+        name.add_css_class("row-subtitle");
+
+        let data = gtk::Label::new(Some(value));
+        data.set_xalign(1.0);
+        data.add_css_class("row-subtitle");
+        data.add_css_class("mono");
+
+        line.append(&name);
+        line.append(&data);
+        column.append(&line);
+    }
+
+    column
+}
+
+fn no_data() -> gtk::Label {
+    let label = gtk::Label::new(Some("no data"));
+    label.set_xalign(0.0);
+    label.add_css_class("row-meta");
+    label
 }
 
 fn panel(title: &str, rows: &[(&str, String)]) -> gtk::Widget {
