@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/dev/runetty/Runetty">
+    <file compressed="true">style.css</file>
+  </gresource>
+  <!-- GtkApplication, resource_base_path + "/icons" yolunu ikon temasina
+       kendisi ekler; dosya adlari prefix'e eklendigi icin alias sart. -->
+  <gresource prefix="/dev/runetty/Runetty/icons/scalable/actions">
+    <file alias="rail-sessions-symbolic.svg" preprocess="xml-stripblanks">icons/rail-sessions-symbolic.svg</file>
+    <file alias="rail-agents-symbolic.svg" preprocess="xml-stripblanks">icons/rail-agents-symbolic.svg</file>
+    <file alias="rail-monitor-symbolic.svg" preprocess="xml-stripblanks">icons/rail-monitor-symbolic.svg</file>
+  </gresource>
+  <gresource prefix="/dev/runetty/Runetty/icons/scalable/apps">
+    <file alias="dev.runetty.Runetty.svg" preprocess="xml-stripblanks">../icons/dev.runetty.Runetty.svg</file>
+  </gresource>
+</gresources>

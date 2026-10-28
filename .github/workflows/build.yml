@@ -1,0 +1,53 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Taban ve ustu: yerel derlemenin desteklendigi dagitimlar.
+  native:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu-24.04
+            image: ubuntu:24.04
+          - name: debian-trixie
+            image: debian:trixie
+          - name: archlinux
+            image: archlinux:latest
+    container: ${{ matrix.image }}
+    name: native (${{ matrix.name }})
+    steps:
+      - name: Checkout araclarini kur
+        run: |
+          set -eux
+          if command -v pacman >/dev/null; then
+            pacman -Sy --noconfirm --needed git
+          else
+            apt-get update && apt-get install -y --no-install-recommends git ca-certificates sudo
+          fi
+      - uses: actions/checkout@v4
+      - name: Bagimliliklar
+        run: ./build-aux/install-deps.sh
+      - name: Derle
+        run: cargo build --release --locked
+      - name: Terminalsiz derleme
+        run: cargo build --release --locked --no-default-features
+
+  # Taban altindaki dagitimlar Flatpak ile kapsaniyor.
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: bilelmoussaoui/flatpak-github-actions:gnome-48
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: runetty.flatpak
+          manifest-path: build-aux/dev.runetty.Runetty.yaml
+          cache-key: flatpak-builder-${{ github.sha }}

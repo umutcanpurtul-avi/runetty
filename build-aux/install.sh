@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Yerel derlemeyi sisteme kurar. PREFIX=~/.local ya da PREFIX=/usr/local.
+set -euo pipefail
+
+PREFIX=${PREFIX:-$HOME/.local}
+root=$(cd "$(dirname "$0")/.." && pwd)
+
+[ -x "$root/target/release/runetty" ] || {
+  echo "once: cargo build --release" >&2; exit 1;
+}
+
+install -Dm755 "$root/target/release/runetty" "$PREFIX/bin/runetty"
+install -Dm644 "$root/data/dev.runetty.Runetty.desktop" \
+  "$PREFIX/share/applications/dev.runetty.Runetty.desktop"
+install -Dm644 "$root/data/dev.runetty.Runetty.metainfo.xml" \
+  "$PREFIX/share/metainfo/dev.runetty.Runetty.metainfo.xml"
+install -Dm644 "$root/data/icons/dev.runetty.Runetty.svg" \
+  "$PREFIX/share/icons/hicolor/scalable/apps/dev.runetty.Runetty.svg"
+
+command -v gtk-update-icon-cache >/dev/null &&
+  gtk-update-icon-cache -qtf "$PREFIX/share/icons/hicolor" 2>/dev/null || true
+command -v update-desktop-database >/dev/null &&
+  update-desktop-database -q "$PREFIX/share/applications" 2>/dev/null || true
+
+echo "kuruldu: $PREFIX/bin/runetty"

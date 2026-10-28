@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.runetty.Runetty</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>runetty</name>
+  <summary>SSH session manager and terminal</summary>
+  <description>
+    <p>
+      SSH oturumlarini, calisan agent'lari ve sunucu metriklerini tek pencerede
+      toplayan bir terminal istemcisi.
+    </p>
+  </description>
+  <launchable type="desktop-id">dev.runetty.Runetty.desktop</launchable>
+  <categories>
+    <category>System</category>
+    <category>TerminalEmulator</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-28">
+      <description><p>Ilk gorsel iskelet.</p></description>
+    </release>
+  </releases>
+</component>

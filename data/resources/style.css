@@ -1,0 +1,314 @@
+/* runetty tasarim sistemi
+ * Tum gorsel kararlar burada. Rust tarafinda renk/olcu gecmez.
+ * GTK 4.14 ile uyumlu sozdizimi: @define-color (var() 4.16+ oldugu icin kullanilmiyor).
+ */
+
+@define-color bg_base        #0d0d12;
+@define-color bg_sidebar     #0a0a0f;
+@define-color bg_rail        #08080c;
+@define-color bg_elevated    #16161d;
+@define-color bg_hover       alpha(#ffffff, 0.04);
+@define-color bg_active      alpha(#ffffff, 0.08);
+@define-color hairline       alpha(#ffffff, 0.06);
+
+@define-color fg_primary     #f5f6f8;
+@define-color fg_secondary   #9aa0ab;
+@define-color fg_tertiary    #5f6673;
+
+@define-color accent         #4a7dff;
+@define-color state_blocked  #e8a33d;
+@define-color state_working  #3b82f6;
+@define-color state_done     #4ade80;
+@define-color state_idle     #6b7280;
+
+/* libadwaita'nin kendi tokenlari da ayni palete oturtuluyor; boylece
+ * hazir widget'lar (PreferencesDialog, ActionRow, Toast) uyumlu kaliyor. */
+@define-color window_bg_color      @bg_base;
+@define-color window_fg_color      @fg_primary;
+@define-color view_bg_color        @bg_base;
+@define-color view_fg_color        @fg_primary;
+@define-color headerbar_bg_color   @bg_sidebar;
+@define-color headerbar_fg_color   @fg_primary;
+@define-color popover_bg_color     @bg_elevated;
+@define-color popover_fg_color     @fg_primary;
+@define-color card_bg_color        @bg_elevated;
+@define-color dialog_bg_color      @bg_elevated;
+@define-color accent_bg_color      @accent;
+@define-color accent_color         @accent;
+
+/* --- taban --- */
+
+window.runetty {
+  font-family: Inter, "Adwaita Sans", Cantarell, "Noto Sans", sans-serif;
+  font-size: 13px;
+  color: @fg_primary;
+  background-color: @bg_base;
+}
+
+.mono {
+  font-family: "JetBrains Mono", "IBM Plex Mono", "Source Code Pro",
+               "DejaVu Sans Mono", monospace;
+  font-feature-settings: "liga" 0;
+}
+
+.dim      { color: @fg_secondary; }
+.dimmer   { color: @fg_tertiary; }
+
+/* --- icerik zemini: iki dusuk doygunluklu radyal gecis --- */
+
+.content-bg {
+  background-color: @bg_base;
+  background-image:
+    radial-gradient(ellipse farthest-corner at 30% 18%,
+                    alpha(#4a7dff, 0.10) 0%, transparent 62%),
+    radial-gradient(ellipse farthest-corner at 76% 72%,
+                    alpha(#8b5cf6, 0.08) 0%, transparent 58%);
+}
+
+/* --- sol ikon rayi --- */
+
+.icon-rail {
+  background-color: @bg_rail;
+  padding: 8px 0;
+  min-width: 44px;
+}
+
+.icon-rail button {
+  min-width: 30px;
+  min-height: 30px;
+  margin: 2px 7px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  box-shadow: none;
+  color: @fg_tertiary;
+}
+
+.icon-rail button:hover  { background-color: @bg_hover; color: @fg_secondary; }
+.icon-rail button:checked,
+.icon-rail button:active { background-color: @accent; color: #ffffff; }
+
+/* --- baslik cubugu --- */
+
+headerbar.runetty {
+  background-color: @bg_sidebar;
+  border-bottom: 1px solid @hairline;
+  box-shadow: none;
+  min-height: 42px;
+  padding: 0 6px;
+}
+
+.global-search {
+  min-height: 28px;
+  min-width: 320px;
+  border-radius: 999px;
+  border: 1px solid @hairline;
+  background-color: alpha(#ffffff, 0.03);
+  box-shadow: none;
+  color: @fg_secondary;
+  padding: 0 10px;
+}
+
+.global-search:focus-within {
+  border-color: alpha(@accent, 0.55);
+  background-color: alpha(#ffffff, 0.05);
+  color: @fg_primary;
+}
+
+/* --- kenar cubugu --- */
+
+.sidebar-pane {
+  background-color: @bg_sidebar;
+}
+
+.section-header {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: @fg_tertiary;
+  padding: 14px 12px 6px 12px;
+}
+
+/* iki katmanli liste satiri */
+
+.session-row {
+  min-height: 44px;
+  padding: 4px 12px;
+  border-radius: 8px;
+  margin: 1px 6px;
+}
+
+.session-row:hover    { background-color: @bg_hover; }
+.session-row:selected,
+.session-row.selected { background-color: @bg_active; }
+
+.row-title    { font-size: 13px; font-weight: 500; color: @fg_primary; }
+.row-subtitle { font-size: 11px; font-weight: 400; color: @fg_secondary; }
+.row-meta     { font-size: 10px; font-weight: 400; color: @fg_tertiary; }
+
+/* durum noktasi */
+
+.status-dot {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 999px;
+  background-color: @state_idle;
+}
+
+.status-dot.blocked { background-color: @state_blocked; }
+.status-dot.working { background-color: @state_working; }
+.status-dot.done    { background-color: @state_done; }
+.status-dot.idle    { background-color: @state_idle; }
+
+/* hap rozet */
+
+.badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: @fg_secondary;
+  background-color: alpha(#ffffff, 0.06);
+  border-radius: 999px;
+  padding: 2px 8px;
+  min-height: 20px;
+}
+
+.badge.blocked { color: @state_blocked; background-color: alpha(#e8a33d, 0.14); }
+.badge.working { color: @state_working; background-color: alpha(#3b82f6, 0.14); }
+.badge.done    { color: @state_done;    background-color: alpha(#4ade80, 0.14); }
+
+/* kenar cubugu alt bari */
+
+.sidebar-footer {
+  min-height: 40px;
+  padding: 4px 6px;
+  border-top: 1px solid @hairline;
+  background-color: @bg_sidebar;
+}
+
+.sidebar-footer entry {
+  min-height: 26px;
+  border-radius: 8px;
+  border: none;
+  background-color: alpha(#ffffff, 0.04);
+  box-shadow: none;
+  color: @fg_secondary;
+  font-size: 11px;
+}
+
+.sidebar-footer button {
+  min-width: 26px;
+  min-height: 26px;
+  border-radius: 8px;
+  border: none;
+  background: none;
+  box-shadow: none;
+  color: @fg_secondary;
+}
+
+.sidebar-footer button:hover { background-color: @bg_hover; color: @fg_primary; }
+
+/* --- bos durum --- */
+
+.empty-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: @fg_primary;
+}
+
+.command-field {
+  min-height: 40px;
+  min-width: 440px;
+  border-radius: 999px;
+  border: 1px solid @hairline;
+  background-color: alpha(#ffffff, 0.04);
+  box-shadow: none;
+  color: @fg_primary;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.command-field:focus-within { border-color: alpha(@accent, 0.6); }
+
+.chip {
+  border-radius: 999px;
+  border: 1px solid @hairline;
+  background-color: alpha(#ffffff, 0.03);
+  box-shadow: none;
+  padding: 4px 12px;
+  min-height: 26px;
+  font-size: 11px;
+  color: @fg_secondary;
+}
+
+.chip:hover { background-color: @bg_hover; color: @fg_primary; }
+
+.keycap {
+  font-size: 10px;
+  color: @fg_tertiary;
+  background-color: alpha(#ffffff, 0.05);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.hint-row { font-size: 10px; color: @fg_tertiary; }
+
+/* --- sekmeler --- */
+
+tabbar.runetty > * { background-color: @bg_sidebar; }
+
+tabbar.runetty tabbox > tab {
+  color: @fg_secondary;
+  font-size: 12px;
+  min-height: 32px;
+}
+
+tabbar.runetty tabbox > tab:checked {
+  color: @fg_primary;
+  background-color: @bg_base;
+}
+
+.shortcut {
+  font-size: 10px;
+  color: @fg_tertiary;
+  background-color: alpha(#ffffff, 0.05);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 6px;
+}
+
+/* --- terminal --- */
+
+.terminal-page {
+  background-color: @bg_base;
+  padding: 6px 8px;
+}
+
+/* listbox'i sifirla: cerceve ve kendi zemini olmasin */
+.sidebar-pane listbox,
+.sidebar-pane list {
+  background: none;
+  border: none;
+}
+
+.sidebar-pane row {
+  background: none;
+  padding: 0;
+  min-height: 0;
+}
+
+.sidebar-pane row:selected .session-row,
+.sidebar-pane row:active .session-row {
+  background-color: @bg_active;
+}
+
+.sidebar-pane expander-widget > box > title {
+  padding: 2px 12px;
+}
+
+.folder-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: @fg_secondary;
+}

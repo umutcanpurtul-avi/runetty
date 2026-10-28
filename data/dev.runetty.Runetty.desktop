@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=runetty
+GenericName=SSH Session Manager
+Comment=SSH oturumlari, agent'lar ve sunucu izleme
+Exec=runetty
+Icon=dev.runetty.Runetty
+Terminal=false
+Type=Application
+Categories=System;TerminalEmulator;
+Keywords=ssh;terminal;server;remote;
+StartupNotify=true
+StartupWMClass=dev.runetty.Runetty

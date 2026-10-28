@@ -1,0 +1,72 @@
+# Flatpak, runetty'nin birincil dagitim bicimi.
+# Gerekcesi: GTK/libadwaita surumleri dagitimlar arasinda cok ayrisiyor
+# (Rocky 9'da GTK 4.6, Arch'ta 4.20+). Runtime bunu sabitler.
+#
+# Derleme:
+#   flatpak install -y flathub org.gnome.Platform//48 org.gnome.Sdk//48 \
+#       org.freedesktop.Sdk.Extension.rust-stable//24.08
+#   python3 build-aux/flatpak-cargo-generator.py Cargo.lock -o build-aux/cargo-sources.json
+#   flatpak-builder --user --install --force-clean build build-aux/dev.runetty.Runetty.yaml
+#
+# flatpak-cargo-generator.py: https://github.com/flatpak/flatpak-builder-tools
+
+id: dev.runetty.Runetty
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: runetty
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+  env:
+    CARGO_HOME: /run/build/runetty/cargo
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # SSH: ag, anahtarlar ve ~/.ssh/config
+  - --share=network
+  - --socket=ssh-auth
+  - --filesystem=~/.ssh
+  - --filesystem=home
+  - --talk-name=org.freedesktop.Notifications
+
+modules:
+  # GNOME runtime'inin vte surumu degisebiliyor; kendi surumumuzu sabitliyoruz.
+  - name: vte
+    buildsystem: meson
+    config-opts:
+      - -Dgtk3=false
+      - -Dgtk4=true
+      - -Dvapi=false
+      - -Ddocs=false
+      - -Dgir=false
+    sources:
+      - type: git
+        url: https://gitlab.gnome.org/GNOME/vte.git
+        tag: '0.78.4'
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/gir-1.0
+
+  - name: runetty
+    buildsystem: simple
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml --verbose
+      - cargo --offline build --release --verbose
+      - install -Dm755 target/release/runetty /app/bin/runetty
+      - install -Dm644 data/dev.runetty.Runetty.desktop
+          /app/share/applications/dev.runetty.Runetty.desktop
+      - install -Dm644 data/dev.runetty.Runetty.metainfo.xml
+          /app/share/metainfo/dev.runetty.Runetty.metainfo.xml
+      - install -Dm644 data/icons/dev.runetty.Runetty.svg
+          /app/share/icons/hicolor/scalable/apps/dev.runetty.Runetty.svg
+    sources:
+      - type: dir
+        path: ..
+      - cargo-sources.json
