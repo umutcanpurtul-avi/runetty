@@ -173,6 +173,16 @@ pub fn build(
 
     let monitor = monitor::build(Rc::clone(&store));
 
+    // Sabitlenmis Monitor sagda kendi sutununda durur; sekmeler solda kalir.
+    // Paned, genisligi kullaniciya birakiyor: "ne cok buyuk ne cok kucuk"
+    // karari bir kez verilip dondurulmak yerine surukleyerek ayarlanabiliyor.
+    let panes = gtk::Paned::new(gtk::Orientation::Horizontal);
+    panes.set_start_child(Some(&content_stack));
+    panes.set_resize_start_child(true);
+    panes.set_shrink_start_child(false);
+    panes.set_shrink_end_child(false);
+    panes.set_wide_handle(true);
+
     let split = adw::OverlaySplitView::new();
     split.set_hexpand(true);
     split.set_sidebar_width_fraction(0.22);
@@ -192,15 +202,16 @@ pub fn build(
         let stack = content_stack.clone();
         let tabs = Rc::clone(&tabs);
         let current_mode = Rc::clone(&current_mode);
+        let panes_for_rail = panes.clone();
 
         move |mode| {
             sidebar.set_mode(mode);
             current_mode.set(mode);
 
             if mode == icon_rail::Mode::Monitor {
-                // Sabitlenmisse zaten ekranda; sekme acmaya gerek yok.
+                // Sabitlenmisse panelde olmali; bir sekilde dusmusse geri koy.
                 if monitor.is_pinned() {
-                    monitor.set_active(true);
+                    attach_pinned(&panes_for_rail, &monitor);
                     return;
                 }
                 tabs.open_monitor(&monitor);
@@ -258,16 +269,6 @@ pub fn build(
     content_stack.add_named(&empty_page(&empty.widget), Some("empty"));
     content_stack.add_named(&tabs_page(&tabs.view), Some("tabs"));
     content_stack.set_visible_child_name("empty");
-
-    // Sabitlenmis Monitor sagda kendi sutununda durur; sekmeler solda kalir.
-    // Paned, genisligi kullaniciya birakiyor: "ne cok buyuk ne cok kucuk"
-    // karari bir kez verilip dondurulmak yerine surukleyerek ayarlanabiliyor.
-    let panes = gtk::Paned::new(gtk::Orientation::Horizontal);
-    panes.set_start_child(Some(&content_stack));
-    panes.set_resize_start_child(true);
-    panes.set_shrink_start_child(false);
-    panes.set_shrink_end_child(false);
-    panes.set_wide_handle(true);
 
     let content_view = adw::ToolbarView::new();
     content_view.add_top_bar(&header);
@@ -334,8 +335,17 @@ pub fn build(
         });
     }
 
-    if mode == icon_rail::Mode::Monitor {
+    // Sabitleme tercihi oturumlar arasinda korunuyor.
+    if settings.borrow().layout.monitor_pinned {
+        monitor.set_pinned(true);
+        let monitor = Rc::clone(&monitor);
+        let panes = panes.clone();
+        glib::idle_add_local_once(move || attach_pinned(&panes, &monitor));
+    } else if mode == icon_rail::Mode::Monitor {
         tabs.open_monitor(&monitor);
+    }
+
+    if mode == icon_rail::Mode::Monitor {
         if demo_metrics {
             monitor.demo();
         }
@@ -555,7 +565,10 @@ impl Tabs {
             if page != &closed {
                 return;
             }
-            monitor.set_active(false);
+            // Sabitlenerek sekmeden cikariliyorsa tur devam etmeli.
+            if !monitor.is_pinned() {
+                monitor.set_active(false);
+            }
             *this.monitor_page.borrow_mut() = None;
             if let Some(id) = slot.borrow_mut().take() {
                 view.disconnect(id);
@@ -895,26 +908,38 @@ fn install_actions(w: Wiring) {
         let monitor = Rc::clone(w.monitor);
         let tabs = Rc::clone(w.tabs);
         let panes = w.panes.clone();
+        let settings_for_pin = Rc::clone(w.settings);
         toggle_pin.connect_activate(move |_, _| {
             if monitor.is_pinned() {
                 monitor.set_pinned(false);
                 panes.set_end_child(gtk::Widget::NONE);
                 tabs.open_monitor(&monitor);
+
+                let mut settings = settings_for_pin.borrow_mut();
+                settings.layout.monitor_pinned = false;
+                settings.save();
                 return;
             }
 
-            tabs.close_monitor();
-            monitor.set_pinned(true);
-            panes.set_end_child(Some(&monitor.widget));
-
-            // Varsayilan genislik: kartlar sigacak kadar genis, icerigi
-            // bogmayacak kadar dar. Kullanici buradan surukleyebiliyor.
-            if panes.position() == 0 {
-                let width = panes.width();
-                panes.set_position(if width > 900 { width - 420 } else { width / 2 });
+            {
+                let mut settings = settings_for_pin.borrow_mut();
+                settings.layout.monitor_pinned = true;
+                settings.save();
             }
 
-            monitor.set_active(true);
+            // Sira onemli: once sabit isaretle, sonra sekmeyi kapat.
+            // page-detached isleyicisi sabitlenmis Monitor'u durdurmasin.
+            monitor.set_pinned(true);
+            tabs.close_monitor();
+
+            // close_page widget'i hemen serbest birakmiyor; ayni karede
+            // panele eklemek "zaten bir ebeveyni var" hatasina dusuyor ve
+            // Monitor ekrandan tamamen kayboluyordu.
+            let monitor = Rc::clone(&monitor);
+            let panes = panes.clone();
+            glib::idle_add_local_once(move || {
+                attach_pinned(&panes, &monitor);
+            });
         });
     }
     add(&toggle_pin);
@@ -922,6 +947,43 @@ fn install_actions(w: Wiring) {
     let palette = gio::SimpleAction::new("command-palette", None);
     palette.connect_activate(|_, _| glib::g_debug!("runetty", "TODO: command palette"));
     add(&palette);
+}
+
+/// Sabitlenmis Monitor'u sag sutuna yerlestirir. Idempotent: zaten
+/// oradaysa dokunmuyor, baska bir ebeveyni varsa once koparıyor.
+fn attach_pinned(panes: &gtk::Paned, monitor: &Rc<monitor::Monitor>) {
+    if panes.end_child().as_ref() == Some(&monitor.widget) {
+        monitor.set_active(true);
+        return;
+    }
+
+    if let Some(parent) = monitor.widget.parent() {
+        if let Some(view) = parent.downcast_ref::<adw::TabView>() {
+            if let Some(page) = view.page(&monitor.widget).into() {
+                let page: adw::TabPage = page;
+                view.close_page(&page);
+            }
+        }
+    }
+
+    // Hala bagliysa bu karede ekleyemeyiz; bir tur sonra tekrar dene.
+    if monitor.widget.parent().is_some() {
+        let panes = panes.clone();
+        let monitor = Rc::clone(monitor);
+        glib::idle_add_local_once(move || attach_pinned(&panes, &monitor));
+        return;
+    }
+
+    panes.set_end_child(Some(&monitor.widget));
+
+    // Varsayilan genislik: kartlar sigacak kadar genis, icerigi bogmayacak
+    // kadar dar. Kullanici tutamaktan surukleyerek degistirebiliyor.
+    let width = panes.width();
+    if width > 0 {
+        panes.set_position(if width > 900 { width - 420 } else { width / 2 });
+    }
+
+    monitor.set_active(true);
 }
 
 fn show_about(window: &adw::ApplicationWindow) {

@@ -107,10 +107,19 @@ fn quote_family(value: &str) -> String {
     format!("\"{}\", \"Adwaita Sans\", Cantarell, sans-serif", value.trim().replace('"', ""))
 }
 
+/// Pencere yerlesimi: oturumlar arasinda korunan tercihler.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Layout {
+    /// Monitor sagda sabit panelde mi duruyor?
+    pub monitor_pinned: bool,
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub appearance: Appearance,
+    pub layout: Layout,
 }
 
 impl Settings {

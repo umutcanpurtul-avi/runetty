@@ -472,3 +472,52 @@ mod tests {
         assert!(store.folders().is_empty());
     }
 }
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+
+    /// Kayit dosyasi sessizce bozulursa izleme listesi ve klasorler
+    /// her acilista sifirlanir. Gidis-donus burada sabitleniyor.
+    #[test]
+    fn file_survives_a_round_trip() {
+        let mut file = File::default();
+        file.hidden.push("gizli".into());
+        file.monitored.push("izlenen".into());
+        file.empty_folders.push("bos-klasor".into());
+        file.last_used.insert("izlenen".into(), 1_700_000_000);
+        file.folders.insert("gizli".into(), "lab".into());
+        file.hosts.push(LocalHost {
+            alias: "box".into(),
+            hostname: "example.test".into(),
+            user: Some("root".into()),
+            port: Some(2222),
+            folder: Some("lab".into()),
+            identity_file: Some("/home/u/.ssh/id_ed25519".into()),
+        });
+
+        let text = toml::to_string_pretty(&file).expect("serilestirilebilmeli");
+        let parsed: File = toml::from_str(&text).expect("okunabilmeli");
+
+        assert_eq!(parsed.hidden, vec!["gizli".to_string()]);
+        assert_eq!(parsed.monitored, vec!["izlenen".to_string()]);
+        assert_eq!(parsed.empty_folders, vec!["bos-klasor".to_string()]);
+        assert_eq!(parsed.last_used.get("izlenen"), Some(&1_700_000_000));
+        assert_eq!(parsed.folders.get("gizli").map(String::as_str), Some("lab"));
+        assert_eq!(parsed.hosts.len(), 1);
+        assert_eq!(parsed.hosts[0].port, Some(2222));
+        assert_eq!(parsed.hosts[0].identity_file.as_deref(), Some("/home/u/.ssh/id_ed25519"));
+    }
+
+    /// Eski bir dosyada olmayan alanlar varsayilanla gelmeli; aksi halde
+    /// surum yukseltmesi butun kayitlari dusurur.
+    #[test]
+    fn older_files_without_new_fields_still_load() {
+        let text = "hidden = []\n\n[[host]]\nalias = \"box\"\nhostname = \"example.test\"\n";
+        let parsed: File = toml::from_str(text).expect("okunabilmeli");
+
+        assert!(parsed.monitored.is_empty());
+        assert!(parsed.empty_folders.is_empty());
+        assert_eq!(parsed.hosts.len(), 1);
+    }
+}
