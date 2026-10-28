@@ -40,26 +40,39 @@ pub fn build(
         Rc::new(move |command: &str| tabs.open_or_focus(command, None))
     };
 
+    // Kayitli sunucu icin komutu uretip zaman damgasini gunceller.
+    let command_for: Rc<dyn Fn(&str) -> Option<String>> = {
+        let store = Rc::clone(&store);
+        Rc::new(move |alias: &str| {
+            let mut store = store.borrow_mut();
+            let host = store.hosts().into_iter().find(|host| host.alias == alias)?;
+            store.touch(alias);
+            Some(host.command())
+        })
+    };
+
+    // Her zaman yeni sekme: Ctrl+tik, orta tik ve menudeki "New Session".
+    let connect_new: Rc<dyn Fn(&str)> = {
+        let command_for = Rc::clone(&command_for);
+        let tabs = Rc::clone(&tabs);
+        Rc::new(move |alias: &str| {
+            if let Some(command) = command_for(alias) {
+                tabs.spawn(&command, Some(alias));
+                with_refresh(|refresh| refresh());
+            }
+        })
+    };
+
     // Kayitli sunucu: zaman damgasi guncellenir, sonra komut calisir.
     let connect: Rc<dyn Fn(&str)> = {
-        let store = Rc::clone(&store);
+        let command_for = Rc::clone(&command_for);
         let tabs = Rc::clone(&tabs);
         let refresh: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
         let refresh_slot = Rc::clone(&refresh);
         REFRESH.with(|cell| *cell.borrow_mut() = Some(refresh_slot));
 
         Rc::new(move |alias: &str| {
-            let command = {
-                let mut store = store.borrow_mut();
-                let host = store.hosts().into_iter().find(|host| host.alias == alias);
-                match host {
-                    Some(host) => {
-                        store.touch(alias);
-                        host.command()
-                    }
-                    None => return,
-                }
-            };
+            let Some(command) = command_for(alias) else { return };
 
             tabs.open_or_focus(&command, Some(alias));
             if let Some(refresh) = refresh.borrow().as_ref() {
@@ -68,7 +81,12 @@ pub fn build(
         })
     };
 
-    let sidebar = sidebar::build(Rc::clone(&store), Rc::clone(&live), Rc::clone(&connect));
+    let sidebar = sidebar::build(
+        Rc::clone(&store),
+        Rc::clone(&live),
+        Rc::clone(&connect),
+        Rc::clone(&connect_new),
+    );
     sidebar.set_mode(mode);
 
     let empty = empty_state::build(Rc::clone(&store), Rc::clone(&connect), Rc::clone(&run));
@@ -126,7 +144,15 @@ pub fn build(
 
     window.set_content(Some(&split));
 
-    install_actions(&window, &split, &search, &store, &connect, &refresh);
+    install_actions(
+        &window,
+        &split,
+        &search,
+        &store,
+        &connect,
+        &connect_new,
+        &refresh,
+    );
 
     // Son sekme kapaninca bos duruma geri don.
     {
@@ -140,11 +166,14 @@ pub fn build(
         tabs.open_or_focus(command, None);
     }
 
-    // Virgulle ayrilmis liste: birden fazla oturumu tek komutla acmak
-    // ve ayni aliasi tekrar vererek odaklanmayi dogrulamak icin.
+    // Virgulle ayrilmis liste; `+` oneki ek oturum acar. Odaklanma ve
+    // coklu oturum davranisini tek komutla dogrulamak icin.
     if let Some(aliases) = autoconnect {
         for alias in aliases.split(',').map(str::trim).filter(|a| !a.is_empty()) {
-            connect(alias);
+            match alias.strip_prefix('+') {
+                Some(alias) => connect_new(alias),
+                None => connect(alias),
+            }
         }
     }
 
@@ -208,7 +237,9 @@ fn tabs_page(tabs: &adw::TabView) -> gtk::Widget {
 struct Tabs {
     view: adw::TabView,
     stack: gtk::Stack,
-    open: RefCell<HashMap<String, adw::TabPage>>,
+    /// Alias -> acik sekmeleri. Ayni sunucuya birden fazla oturum
+    /// acilabiliyor; odaklanma en son acilana gider.
+    open: RefCell<HashMap<String, Vec<adw::TabPage>>>,
     live: Rc<Sessions>,
 }
 
@@ -222,9 +253,10 @@ impl Tabs {
         with_refresh(|refresh| refresh());
     }
 
+    /// Acik oturum varsa ona gecer; yoksa yenisini acar.
     fn open_or_focus(self: &Rc<Self>, command: &str, alias: Option<&str>) {
         if let Some(alias) = alias {
-            let existing = self.open.borrow().get(alias).cloned();
+            let existing = self.open.borrow().get(alias).and_then(|p| p.last().cloned());
             if let Some(page) = existing {
                 self.view.set_selected_page(&page);
                 self.stack.set_visible_child_name("tabs");
@@ -244,7 +276,7 @@ impl Tabs {
 
         let Some(alias) = alias else { return };
 
-        self.open.borrow_mut().insert(alias.to_string(), page.clone());
+        self.open.borrow_mut().entry(alias.to_string()).or_default().push(page.clone());
         self.mark(alias, sessions::State::Open);
 
         // Sekme kapaninca kayit defterden dusuyor ve nokta kirmiziya doner.
@@ -260,8 +292,21 @@ impl Tabs {
             if page != &closed {
                 return;
             }
-            this.open.borrow_mut().remove(&alias);
-            this.mark(&alias, sessions::State::Closed);
+            let empty = {
+                let mut open = this.open.borrow_mut();
+                let remaining = open.entry(alias.clone()).or_default();
+                remaining.retain(|candidate| candidate != &closed);
+                let empty = remaining.is_empty();
+                if empty {
+                    open.remove(&alias);
+                }
+                empty
+            };
+
+            // Baska sekmesi duruyorsa sunucu hala bagli sayilir.
+            if empty {
+                this.mark(&alias, sessions::State::Closed);
+            }
             if let Some(id) = slot.borrow_mut().take() {
                 view.disconnect(id);
             }
@@ -324,6 +369,7 @@ fn install_actions(
     search: &gtk::SearchEntry,
     store: &Rc<RefCell<Store>>,
     connect: &Rc<dyn Fn(&str)>,
+    connect_new: &Rc<dyn Fn(&str)>,
     refresh: &Rc<dyn Fn()>,
 ) {
     let focus_search = gio::SimpleAction::new("global-search", None);
@@ -357,6 +403,17 @@ fn install_actions(
         });
     }
     window.add_action(&host_connect);
+
+    let host_connect_new = gio::SimpleAction::new("host-connect-new", string);
+    {
+        let connect_new = Rc::clone(connect_new);
+        host_connect_new.connect_activate(move |_, target| {
+            if let Some(alias) = target.and_then(glib::Variant::str) {
+                connect_new(alias);
+            }
+        });
+    }
+    window.add_action(&host_connect_new);
 
     let host_edit = gio::SimpleAction::new("host-edit", string);
     {

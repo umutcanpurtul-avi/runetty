@@ -92,10 +92,46 @@ pub fn present<F>(
 
     let key = adw::EntryRow::new();
     key.set_title("SSH Key");
+
+    // Bos geliyor: anahtari uygulama degil kullanici secer.
+    // ~/.ssh'deki anahtarlar menude hazir, disaridan dosya secmek de serbest.
+    let keys = available_keys();
+    if !keys.is_empty() {
+        let menu = gio::Menu::new();
+        for path in &keys {
+            let label = path.rsplit('/').next().unwrap_or(path);
+            let item = gio::MenuItem::new(Some(label), None);
+            item.set_action_and_target_value(Some("key.pick"), Some(&path.to_variant()));
+            menu.append_item(&item);
+        }
+
+        let pick = gio::SimpleAction::new("pick", Some(glib::VariantTy::STRING));
+        {
+            let key = key.clone();
+            pick.connect_activate(move |_, target| {
+                if let Some(path) = target.and_then(glib::Variant::str) {
+                    key.set_text(path);
+                }
+            });
+        }
+
+        let actions = gio::SimpleActionGroup::new();
+        actions.add_action(&pick);
+        key.insert_action_group("key", Some(&actions));
+
+        let list = gtk::MenuButton::new();
+        list.set_icon_name("pan-down-symbolic");
+        list.add_css_class("flat");
+        list.set_valign(gtk::Align::Center);
+        list.set_tooltip_text(Some("~/.ssh icindeki anahtarlar"));
+        list.set_menu_model(Some(&menu));
+        key.add_suffix(&list);
+    }
+
     let browse = gtk::Button::from_icon_name("document-open-symbolic");
     browse.add_css_class("flat");
     browse.set_valign(gtk::Align::Center);
-    browse.set_tooltip_text(Some("Anahtar dosyasi sec"));
+    browse.set_tooltip_text(Some("Baska bir dosya sec"));
     key.add_suffix(&browse);
     auth.add(&key);
 
@@ -128,11 +164,6 @@ pub fn present<F>(
             name.set_tooltip_text(Some(
                 "~/.ssh/config icinde tanimli; adi orada degisir",
             ));
-        }
-    } else {
-        // Yeni kayitta en yaygin anahtari hazir onerelim.
-        if let Some(default_key) = default_identity() {
-            key.set_text(&default_key);
         }
     }
 
@@ -235,14 +266,31 @@ fn choose_key(parent: &adw::AlertDialog, target: &adw::EntryRow) {
     });
 }
 
-/// ~/.ssh altindaki en yaygin varsayilan anahtar.
-fn default_identity() -> Option<String> {
-    let ssh = dirs::home_dir()?.join(".ssh");
-    ["id_ed25519", "id_ecdsa", "id_rsa"]
-        .iter()
-        .map(|name| ssh.join(name))
-        .find(|path| path.is_file())
+/// ~/.ssh altindaki ozel anahtarlar. Olcut: yaninda `.pub` esi olan dosya.
+/// Bu, `config`, `known_hosts` ve `.pub` dosyalarini dogal olarak eliyor.
+fn available_keys() -> Vec<String> {
+    let Some(ssh) = dirs::home_dir().map(|home| home.join(".ssh")) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&ssh) else {
+        return Vec::new();
+    };
+
+    let mut keys: Vec<String> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .filter(|path| path.extension().is_none_or(|ext| ext != "pub"))
+        .filter(|path| ssh.join(format!("{}.pub", file_name(path))).is_file())
         .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+
+    keys.sort();
+    keys
+}
+
+fn file_name(path: &std::path::Path) -> String {
+    path.file_name().unwrap_or_default().to_string_lossy().into_owned()
 }
 
 fn non_empty(value: &str) -> Option<String> {

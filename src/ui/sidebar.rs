@@ -27,6 +27,7 @@ pub struct Sidebar {
     store: Rc<RefCell<Store>>,
     live: Rc<Sessions>,
     connect: Rc<dyn Fn(&str)>,
+    connect_new: Rc<dyn Fn(&str)>,
     filter: RefCell<String>,
 }
 
@@ -125,6 +126,34 @@ impl Sidebar {
             });
         }
 
+        // Ctrl+tik ve orta tik: ayni sunucuya ek oturum. Sade tik, var olan
+        // sekmeye goturdugu icin ikinci oturumun ayri bir yolu olmali.
+        {
+            let hosts = hosts.clone();
+            let this = Rc::clone(self);
+            let extra = gtk::GestureClick::new();
+            extra.set_button(0);
+            extra.connect_pressed(move |gesture, _, _, y| {
+                let control = gesture
+                    .current_event_state()
+                    .contains(gtk::gdk::ModifierType::CONTROL_MASK);
+                let middle = gesture.current_button() == gtk::gdk::BUTTON_MIDDLE;
+                if !control && !middle {
+                    return;
+                }
+
+                let Some(list) = gesture.widget().and_downcast::<gtk::ListBox>() else {
+                    return;
+                };
+                let Some(row) = list.row_at_y(y as i32) else { return };
+                let Some(host) = hosts.get(row.index() as usize) else { return };
+
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                (this.connect_new)(&host.alias);
+            });
+            list.add_controller(extra);
+        }
+
         let this = Rc::clone(self);
         let gesture = gtk::GestureClick::new();
         gesture.set_button(gtk::gdk::BUTTON_SECONDARY);
@@ -162,6 +191,7 @@ fn context_menu(alias: &str) -> gio::Menu {
     let menu = gio::Menu::new();
     for (label, action) in [
         ("Connect", "win.host-connect"),
+        ("New Session", "win.host-connect-new"),
         ("Edit", "win.host-edit"),
         ("Delete", "win.host-delete"),
     ] {
@@ -193,6 +223,7 @@ pub fn build(
     store: Rc<RefCell<Store>>,
     live: Rc<Sessions>,
     connect: Rc<dyn Fn(&str)>,
+    connect_new: Rc<dyn Fn(&str)>,
 ) -> Rc<Sidebar> {
     let stack = gtk::Stack::new();
     stack.set_transition_type(gtk::StackTransitionType::Crossfade);
@@ -234,6 +265,7 @@ pub fn build(
         store,
         live,
         connect,
+        connect_new,
         filter: RefCell::new(String::new()),
     });
 
