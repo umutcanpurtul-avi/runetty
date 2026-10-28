@@ -107,6 +107,15 @@ impl Store {
     }
 
 
+    /// Daha once kullanilmis klasor adlari; diyalogdaki oneri listesi.
+    pub fn folders(&self) -> Vec<String> {
+        let mut names: Vec<String> =
+            self.hosts().into_iter().filter_map(|host| host.folder).collect();
+        names.sort_by_key(|name| name.to_lowercase());
+        names.dedup();
+        names
+    }
+
     pub fn touch(&mut self, alias: &str) {
         self.file.last_used.insert(alias.to_string(), now());
         self.save();

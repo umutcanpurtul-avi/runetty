@@ -3,6 +3,7 @@
 //! birlikte yansir; iki yerde ayri durum tutmuyoruz.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -18,6 +19,7 @@ pub fn build(
     exec: Option<&str>,
     autoconnect: Option<&str>,
     context_menu: Option<&str>,
+    edit: Option<&str>,
 ) -> adw::ApplicationWindow {
     let window = adw::ApplicationWindow::builder()
         .application(app)
@@ -29,33 +31,19 @@ pub fn build(
 
     let store = Rc::new(RefCell::new(Store::load()));
     let live = Sessions::new();
-    let tabs = adw::TabView::new();
     let content_stack = gtk::Stack::new();
+    let tabs = Tabs::new(adw::TabView::new(), content_stack.clone(), Rc::clone(&live));
 
-    // Ham komut: bos durumun komut alanindan gelir.
-    // Durum noktasi: sekme acilinca yesil, surec olunce sari, sekme kapaninca
-    // kayit listeden dusup kirmiziya doner. Gec baglama yine REFRESH uzerinden.
-    let mark: Rc<dyn Fn(&str, sessions::State)> = {
-        let live = Rc::clone(&live);
-        Rc::new(move |alias: &str, state| {
-            live.set(alias, state);
-            with_refresh(|refresh| refresh());
-        })
-    };
-
+    // Ham komut: bos durumun komut alanindan gelir, bir kayda bagli degil.
     let run: Rc<dyn Fn(&str)> = {
-        let tabs = tabs.clone();
-        let stack = content_stack.clone();
-        let mark = Rc::clone(&mark);
-        Rc::new(move |command: &str| open_tab(&tabs, &stack, command, None, &mark))
+        let tabs = Rc::clone(&tabs);
+        Rc::new(move |command: &str| tabs.open_or_focus(command, None))
     };
 
     // Kayitli sunucu: zaman damgasi guncellenir, sonra komut calisir.
     let connect: Rc<dyn Fn(&str)> = {
         let store = Rc::clone(&store);
-        let tabs = tabs.clone();
-        let stack = content_stack.clone();
-        let mark = Rc::clone(&mark);
+        let tabs = Rc::clone(&tabs);
         let refresh: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
         let refresh_slot = Rc::clone(&refresh);
         REFRESH.with(|cell| *cell.borrow_mut() = Some(refresh_slot));
@@ -73,7 +61,7 @@ pub fn build(
                 }
             };
 
-            open_tab(&tabs, &stack, &command, Some(alias), &mark);
+            tabs.open_or_focus(&command, Some(alias));
             if let Some(refresh) = refresh.borrow().as_ref() {
                 refresh();
             }
@@ -128,7 +116,7 @@ pub fn build(
 
     content_stack.set_vexpand(true);
     content_stack.add_named(&empty_page(&empty.widget), Some("empty"));
-    content_stack.add_named(&tabs_page(&tabs), Some("tabs"));
+    content_stack.add_named(&tabs_page(&tabs.view), Some("tabs"));
     content_stack.set_visible_child_name("empty");
 
     let content_view = adw::ToolbarView::new();
@@ -143,17 +131,31 @@ pub fn build(
     // Son sekme kapaninca bos duruma geri don.
     {
         let stack = content_stack.clone();
-        tabs.connect_n_pages_notify(move |view| {
+        tabs.view.connect_n_pages_notify(move |view| {
             stack.set_visible_child_name(if view.n_pages() == 0 { "empty" } else { "tabs" });
         });
     }
 
     if let Some(command) = exec {
-        open_tab(&tabs, &content_stack, command, None, &mark);
+        tabs.open_or_focus(command, None);
     }
 
-    if let Some(alias) = autoconnect {
-        connect(alias);
+    // Virgulle ayrilmis liste: birden fazla oturumu tek komutla acmak
+    // ve ayni aliasi tekrar vererek odaklanmayi dogrulamak icin.
+    if let Some(aliases) = autoconnect {
+        for alias in aliases.split(',').map(str::trim).filter(|a| !a.is_empty()) {
+            connect(alias);
+        }
+    }
+
+    if let Some(alias) = edit.map(str::to_string) {
+        let window = window.clone();
+        let store = Rc::clone(&store);
+        let refresh = Rc::clone(&refresh);
+        glib::idle_add_local_once(move || {
+            let refresh = Rc::clone(&refresh);
+            host_dialog::present(&window, store, Some(alias), move || refresh());
+        });
     }
 
     if let Some(alias) = context_menu.map(str::to_string) {
@@ -201,76 +203,100 @@ fn tabs_page(tabs: &adw::TabView) -> gtk::Widget {
     page.upcast()
 }
 
-fn open_tab(
-    tabs: &adw::TabView,
-    stack: &gtk::Stack,
-    command: &str,
-    alias: Option<&str>,
-    mark: &Rc<dyn Fn(&str, sessions::State)>,
-) {
-    let child = terminal_widget(command, alias, mark);
-    let page = tabs.append(&child);
-    page.set_title(&tab_title(command));
-    tabs.set_selected_page(&page);
-    stack.set_visible_child_name("tabs");
+/// Sekme defteri. Hangi sunucunun hangi sekmede acik oldugunu bilir; ayni
+/// sunucuya tekrar tiklamak yeni sekme acmak yerine acik olana goturuyor.
+struct Tabs {
+    view: adw::TabView,
+    stack: gtk::Stack,
+    open: RefCell<HashMap<String, adw::TabPage>>,
+    live: Rc<Sessions>,
+}
 
-    if let Some(alias) = alias {
-        mark(alias, sessions::State::Open);
+impl Tabs {
+    fn new(view: adw::TabView, stack: gtk::Stack, live: Rc<Sessions>) -> Rc<Self> {
+        Rc::new(Self { view, stack, open: RefCell::new(HashMap::new()), live })
+    }
 
-        // Sekme kapaninca kayit tekrar "acik oturum yok" durumuna doner.
+    fn mark(&self, alias: &str, state: sessions::State) {
+        self.live.set(alias, state);
+        with_refresh(|refresh| refresh());
+    }
+
+    fn open_or_focus(self: &Rc<Self>, command: &str, alias: Option<&str>) {
+        if let Some(alias) = alias {
+            let existing = self.open.borrow().get(alias).cloned();
+            if let Some(page) = existing {
+                self.view.set_selected_page(&page);
+                self.stack.set_visible_child_name("tabs");
+                return;
+            }
+        }
+
+        self.spawn(command, alias);
+    }
+
+    fn spawn(self: &Rc<Self>, command: &str, alias: Option<&str>) {
+        let child = self.terminal(command, alias);
+        let page = self.view.append(&child);
+        page.set_title(&tab_title(command));
+        self.view.set_selected_page(&page);
+        self.stack.set_visible_child_name("tabs");
+
+        let Some(alias) = alias else { return };
+
+        self.open.borrow_mut().insert(alias.to_string(), page.clone());
+        self.mark(alias, sessions::State::Open);
+
+        // Sekme kapaninca kayit defterden dusuyor ve nokta kirmiziya doner.
         // Sinyal bu sayfaya ozel, bu yuzden ilk tetiklenmede kendini soker.
-        let mark = Rc::clone(mark);
+        let this = Rc::clone(self);
         let alias = alias.to_string();
-        let closed = page.clone();
+        let closed = page;
         let handler: Rc<RefCell<Option<glib::SignalHandlerId>>> =
             Rc::new(RefCell::new(None));
         let slot = Rc::clone(&handler);
 
-        *handler.borrow_mut() = Some(tabs.connect_page_detached(move |view, page, _| {
+        *handler.borrow_mut() = Some(self.view.connect_page_detached(move |view, page, _| {
             if page != &closed {
                 return;
             }
-            mark(&alias, sessions::State::Closed);
+            this.open.borrow_mut().remove(&alias);
+            this.mark(&alias, sessions::State::Closed);
             if let Some(id) = slot.borrow_mut().take() {
                 view.disconnect(id);
             }
         }));
     }
-}
 
-#[cfg(feature = "terminal")]
-fn terminal_widget(
-    command: &str,
-    alias: Option<&str>,
-    mark: &Rc<dyn Fn(&str, sessions::State)>,
-) -> gtk::Widget {
-    let owned = alias.map(str::to_string);
-    let mark = Rc::clone(mark);
+    #[cfg(feature = "terminal")]
+    fn terminal(self: &Rc<Self>, command: &str, alias: Option<&str>) -> gtk::Widget {
+        let owned = alias.map(str::to_string);
+        let this = Rc::clone(self);
 
-    crate::ui::terminal::page(Some(command), alias, move |status| {
-        if let Some(alias) = &owned {
-            // Sekme hala acik ama surec bitti: baglanti dustu.
-            mark(alias, if status == 0 {
-                sessions::State::Closed
-            } else {
-                sessions::State::Trouble
-            });
-        }
-    })
-}
+        crate::ui::terminal::page(Some(command), alias, move |status| {
+            if let Some(alias) = &owned {
+                // Sekme hala acik ama komut bitti: baglanti dustu.
+                this.mark(
+                    alias,
+                    if status == 0 {
+                        sessions::State::Closed
+                    } else {
+                        sessions::State::Trouble
+                    },
+                );
+            }
+        })
+    }
 
-#[cfg(not(feature = "terminal"))]
-fn terminal_widget(
-    command: &str,
-    _alias: Option<&str>,
-    _mark: &Rc<dyn Fn(&str, sessions::State)>,
-) -> gtk::Widget {
-    let label = gtk::Label::new(Some(&format!(
-        "Terminal destegi bu derlemede kapali.\n{command}"
-    )));
-    label.add_css_class("dim");
-    label.set_vexpand(true);
-    label.upcast()
+    #[cfg(not(feature = "terminal"))]
+    fn terminal(self: &Rc<Self>, command: &str, _alias: Option<&str>) -> gtk::Widget {
+        let label = gtk::Label::new(Some(&format!(
+            "Terminal destegi bu derlemede kapali.\n{command}"
+        )));
+        label.add_css_class("dim");
+        label.set_vexpand(true);
+        label.upcast()
+    }
 }
 
 /// "ssh deploy@web-a.prod" -> "web-a.prod"

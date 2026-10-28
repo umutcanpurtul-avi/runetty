@@ -19,12 +19,18 @@ pub fn schedule(window: &adw::ApplicationWindow, path: String) {
             },
             None => eprintln!("runetty: pencere henuz cizilmemis"),
         }
-        window.close();
+        // Diyalog acikken close() yutulabiliyor; uygulamayi dogrudan bitir.
+        match window.application() {
+            Some(app) => app.quit(),
+            None => window.close(),
+        }
     });
 }
 
 fn capture(window: &adw::ApplicationWindow) -> Option<gdk::Texture> {
-    let widget = window.content()?;
+    // Pencerenin kendisi: diyaloglar ve toast'lar icerik agacinin disinda,
+    // ustune bindirilmis bir katmanda duruyor.
+    let widget = window.clone().upcast::<gtk::Widget>();
     let (width, height) = (widget.width() as f64, widget.height() as f64);
     if width < 1.0 || height < 1.0 {
         return None;

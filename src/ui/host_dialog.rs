@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::gio;
+use gtk::{gio, glib};
 
 use crate::data::secrets;
 use crate::data::store::{LocalInput, Store};
@@ -36,6 +36,42 @@ pub fn present<F>(
     user.set_title("User");
     let folder = adw::EntryRow::new();
     folder.set_title("Folder");
+
+    // Var olan klasorler bir menuden secilebiliyor; yeni ad yazmak da serbest.
+    let known = store.borrow().folders();
+    if !known.is_empty() {
+        let menu = gio::Menu::new();
+        for name in &known {
+            let item = gio::MenuItem::new(Some(name), None);
+            item.set_action_and_target_value(
+                Some("folder.pick"),
+                Some(&name.to_variant()),
+            );
+            menu.append_item(&item);
+        }
+
+        let pick = gio::SimpleAction::new("pick", Some(glib::VariantTy::STRING));
+        {
+            let folder = folder.clone();
+            pick.connect_activate(move |_, target| {
+                if let Some(name) = target.and_then(glib::Variant::str) {
+                    folder.set_text(name);
+                }
+            });
+        }
+
+        let actions = gio::SimpleActionGroup::new();
+        actions.add_action(&pick);
+        folder.insert_action_group("folder", Some(&actions));
+
+        let button = gtk::MenuButton::new();
+        button.set_icon_name("pan-down-symbolic");
+        button.add_css_class("flat");
+        button.set_valign(gtk::Align::Center);
+        button.set_tooltip_text(Some("Var olan klasorler"));
+        button.set_menu_model(Some(&menu));
+        folder.add_suffix(&button);
+    }
 
     let port = adw::SpinRow::with_range(1.0, 65535.0, 1.0);
     port.set_title("Port");

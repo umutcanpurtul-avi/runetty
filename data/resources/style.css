@@ -36,6 +36,27 @@
 @define-color accent_bg_color      @accent;
 @define-color accent_color         @accent;
 
+/* libadwaita 1.6'dan beri ayni tokenlar CSS degiskeni olarak da okunuyor ve
+ * diyalog/kart gibi bazi yerlerde yalnizca bunlar dikkate aliniyor.
+ * GTK 4.14'te `:root` desteklenmedigi icin blok sessizce atlanir —
+ * orada yukaridaki @define-color tanimlari gecerli kalir. */
+:root {
+  --window-bg-color:    #0d0d12;
+  --window-fg-color:    #f5f6f8;
+  --view-bg-color:      #0d0d12;
+  --view-fg-color:      #f5f6f8;
+  --headerbar-bg-color: #0a0a0f;
+  --headerbar-fg-color: #f5f6f8;
+  --popover-bg-color:   #16161d;
+  --popover-fg-color:   #f5f6f8;
+  --dialog-bg-color:    #16161d;
+  --dialog-fg-color:    #f5f6f8;
+  --card-bg-color:      #16161d;
+  --card-fg-color:      #f5f6f8;
+  --accent-bg-color:    #4a7dff;
+  --accent-color:       #4a7dff;
+}
+
 /* --- taban --- */
 
 window.runetty {

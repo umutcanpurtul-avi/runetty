@@ -51,6 +51,7 @@ fn main() -> glib::ExitCode {
     let exec = argument_value("--exec");
     let autoconnect = argument_value("--connect");
     let context_menu = argument_value("--context-menu");
+    let edit = argument_value("--edit");
 
     // Gelistirme bayraklari acik bir pencere varken de ise yaramali;
     // tek-instance davranisi bunlari calisan surece devredip yutuyor.
@@ -58,6 +59,7 @@ fn main() -> glib::ExitCode {
         || exec.is_some()
         || autoconnect.is_some()
         || context_menu.is_some()
+        || edit.is_some()
     {
         gio::ApplicationFlags::NON_UNIQUE
     } else {
@@ -87,6 +89,7 @@ fn main() -> glib::ExitCode {
                 exec.as_deref(),
                 autoconnect.as_deref(),
                 context_menu.as_deref(),
+                edit.as_deref(),
             );
         window.present();
         if let Some(path) = screenshot.clone() {
