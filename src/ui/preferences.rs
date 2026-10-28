@@ -67,44 +67,64 @@ where
         "Degisiklik aninda uygulanir ve acik terminallere de yansir.",
     ));
 
-    let interface = font_row(
-        "Interface",
-        &settings.borrow().appearance.interface_pango(),
-        {
-            let settings = Rc::clone(&settings);
-            let apply = Rc::clone(&apply);
-            move |font| {
-                {
-                    let mut settings = settings.borrow_mut();
-                    settings.appearance.interface_font = family(&font);
-                    settings.appearance.interface_size = size(&font);
-                    settings.save();
-                }
-                apply();
+    // Aile ve boyut ayri kontroller: font diyalogu yalnizca aile secimi
+    // icin aciliyordu ve "sadece boyutu degistir" diye bir yol yoktu.
+    let interface_family = family_row("Arayuz yazi tipi", &settings.borrow().appearance.interface_font, {
+        let settings = Rc::clone(&settings);
+        let apply = Rc::clone(&apply);
+        move |name| {
+            {
+                let mut settings = settings.borrow_mut();
+                settings.appearance.interface_font = name;
+                settings.save();
             }
-        },
-    );
+            apply();
+        }
+    });
 
-    let terminal = font_row(
-        "Terminal",
-        &settings.borrow().appearance.terminal_pango(),
-        {
-            let settings = Rc::clone(&settings);
-            let apply = Rc::clone(&apply);
-            move |font| {
-                {
-                    let mut settings = settings.borrow_mut();
-                    settings.appearance.terminal_font = family(&font);
-                    settings.appearance.terminal_size = size(&font);
-                    settings.save();
-                }
-                apply();
+    let interface_size = size_row("Arayuz boyutu", settings.borrow().appearance.interface_size, {
+        let settings = Rc::clone(&settings);
+        let apply = Rc::clone(&apply);
+        move |value| {
+            {
+                let mut settings = settings.borrow_mut();
+                settings.appearance.interface_size = value;
+                settings.save();
             }
-        },
-    );
+            apply();
+        }
+    });
 
-    fonts.add(&interface);
-    fonts.add(&terminal);
+    let terminal_family = family_row("Terminal yazi tipi", &settings.borrow().appearance.terminal_font, {
+        let settings = Rc::clone(&settings);
+        let apply = Rc::clone(&apply);
+        move |name| {
+            {
+                let mut settings = settings.borrow_mut();
+                settings.appearance.terminal_font = name;
+                settings.save();
+            }
+            apply();
+        }
+    });
+
+    let terminal_size = size_row("Terminal boyutu", settings.borrow().appearance.terminal_size, {
+        let settings = Rc::clone(&settings);
+        let apply = Rc::clone(&apply);
+        move |value| {
+            {
+                let mut settings = settings.borrow_mut();
+                settings.appearance.terminal_size = value;
+                settings.save();
+            }
+            apply();
+        }
+    });
+
+    fonts.add(&interface_family);
+    fonts.add(&interface_size);
+    fonts.add(&terminal_family);
+    fonts.add(&terminal_size);
 
     let reset = adw::PreferencesGroup::new();
     let button = gtk::Button::with_label("Varsayilanlara don");
@@ -113,18 +133,25 @@ where
     {
         let settings = Rc::clone(&settings);
         let apply = Rc::clone(&apply);
-        let interface = interface.clone();
-        let terminal = terminal.clone();
+        let interface_family = interface_family.clone();
+        let interface_size = interface_size.clone();
+        let terminal_family = terminal_family.clone();
+        let terminal_size = terminal_size.clone();
         button.connect_clicked(move |_| {
+            let theme = settings.borrow().appearance.theme;
             {
                 let mut settings = settings.borrow_mut();
                 settings.appearance = Default::default();
+                // Tema ayri bir tercih; font sifirlamasi onu bozmasin.
+                settings.appearance.theme = theme;
                 settings.save();
             }
 
             let current = settings.borrow().appearance.clone();
-            set_row_font(&interface, &current.interface_pango());
-            set_row_font(&terminal, &current.terminal_pango());
+            set_family(&interface_family, &current.interface_font);
+            interface_size.set_value(current.interface_size);
+            set_family(&terminal_family, &current.terminal_font);
+            terminal_size.set_value(current.terminal_size);
             apply();
         });
     }
@@ -137,20 +164,24 @@ where
     dialog.present(Some(parent));
 }
 
-fn font_row<F>(title: &str, initial: &str, on_change: F) -> adw::ActionRow
+fn family_row<F>(title: &str, initial: &str, on_change: F) -> adw::ActionRow
 where
-    F: Fn(pango::FontDescription) + 'static,
+    F: Fn(String) + 'static,
 {
     let row = adw::ActionRow::new();
     row.set_title(title);
 
     let button = gtk::FontDialogButton::new(Some(gtk::FontDialog::new()));
     button.set_valign(gtk::Align::Center);
-    button.set_font_desc(&pango::FontDescription::from_string(initial));
+    // Once tanim, sonra seviye: ters sirada dugme "None" gosteriyordu.
+    button.set_font_desc(&family_desc(initial));
+    button.set_level(gtk::FontLevel::Family);
+    button.set_use_size(false);
+
     button.connect_font_desc_notify(move |button| {
-        if let Some(font) = button.font_desc() {
-            on_change(font);
-        }
+        let Some(font) = button.font_desc() else { return };
+        let Some(name) = font.family() else { return };
+        on_change(name.to_string());
     });
 
     row.add_suffix(&button);
@@ -158,11 +189,29 @@ where
     row
 }
 
-fn set_row_font(row: &adw::ActionRow, font: &str) {
+fn size_row<F>(title: &str, initial: f64, on_change: F) -> adw::SpinRow
+where
+    F: Fn(f64) + 'static,
+{
+    let row = adw::SpinRow::with_range(7.0, 28.0, 1.0);
+    row.set_title(title);
+    row.set_value(initial);
+    row.connect_value_notify(move |row| on_change(row.value()));
+    row
+}
+
+/// Aile adindan gecerli bir tanim: bos ise temanin varsayilani.
+fn family_desc(name: &str) -> pango::FontDescription {
+    let name = name.trim();
+    let text = if name.is_empty() { "Sans 12".to_string() } else { format!("{name} 12") };
+    pango::FontDescription::from_string(&text)
+}
+
+fn set_family(row: &adw::ActionRow, name: &str) {
     let mut child = row.first_child();
     while let Some(widget) = child {
         if let Some(button) = find_button(&widget) {
-            button.set_font_desc(&pango::FontDescription::from_string(font));
+            button.set_font_desc(&family_desc(name));
             return;
         }
         child = widget.next_sibling();
@@ -186,14 +235,5 @@ fn find_button(widget: &gtk::Widget) -> Option<gtk::FontDialogButton> {
     None
 }
 
-fn family(font: &pango::FontDescription) -> String {
-    font.family().map(|f| f.to_string()).unwrap_or_default()
-}
 
-fn size(font: &pango::FontDescription) -> f64 {
-    let size = font.size();
-    if size <= 0 {
-        return 13.0;
-    }
-    f64::from(size) / f64::from(pango::SCALE)
-}
+

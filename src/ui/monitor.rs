@@ -21,6 +21,7 @@ const INTERVAL: Duration = Duration::from_secs(2);
 
 struct Card {
     widget: gtk::Box,
+    alias: String,
     command: Vec<String>,
     rings: [Ring; 3],
     summary: gtk::Label,
@@ -118,7 +119,7 @@ impl Monitor {
             card.busy.set(true);
 
             glib::spawn_future_local(async move {
-                let result = run(&card.command).await;
+                let result = run(&card.command, &card.alias).await;
                 card.busy.set(false);
 
                 match result {
@@ -160,15 +161,35 @@ impl Card {
     }
 }
 
-async fn run(command: &[String]) -> Result<String, String> {
+async fn run(command: &[String], alias: &str) -> Result<String, String> {
     let args: Vec<&std::ffi::OsStr> =
         command.iter().map(|part| std::ffi::OsStr::new(part)).collect();
 
-    let process = gio::Subprocess::newv(
-        &args,
+    let launcher = gio::SubprocessLauncher::new(
         gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_PIPE,
-    )
-    .map_err(|error| error.message().to_string())?;
+    );
+
+    // Kanal henuz acik degilse parola keyring'den gelsin; terminalde
+    // oldugu gibi komut satirinda hic gorunmuyor.
+    if crate::data::secrets::has(alias) {
+        if let Ok(exe) = std::env::current_exe() {
+            launcher.setenv("SSH_ASKPASS", exe.as_os_str(), true);
+            launcher.setenv(
+                std::ffi::OsStr::new("SSH_ASKPASS_REQUIRE"),
+                std::ffi::OsStr::new("force"),
+                true,
+            );
+            launcher.setenv(
+                std::ffi::OsStr::new("RUNETTY_ASKPASS_ALIAS"),
+                std::ffi::OsStr::new(alias),
+                true,
+            );
+        }
+    }
+
+    let process = launcher
+        .spawn(&args)
+        .map_err(|error| error.message().to_string())?;
 
     let (stdout, stderr) = process
         .communicate_utf8_future(None)
@@ -255,7 +276,8 @@ fn build_card(host: &Host) -> Card {
 
     let card = Card {
         widget,
-        command: metrics::probe_args(&ssh_target(host)),
+        alias: host.alias.clone(),
+        command: metrics::probe_args(host),
         rings,
         summary,
         error,
@@ -266,6 +288,7 @@ fn build_card(host: &Host) -> Card {
     };
 
     let command = card.command.clone();
+    let alias = card.alias.clone();
     let error_box = card.error.clone();
     let error_label = card.error_text.clone();
     retry.connect_clicked(move |button| {
@@ -273,10 +296,11 @@ fn build_card(host: &Host) -> Card {
         error_label.set_text("[!] baglaniyor...");
 
         let command = command.clone();
+        let alias = alias.clone();
         let button = button.clone();
         let error_box = error_box.clone();
         glib::spawn_future_local(async move {
-            let result = run(&command).await;
+            let result = run(&command, &alias).await;
             button.set_sensitive(true);
             if result.is_ok() {
                 error_box.set_visible(false);
@@ -301,16 +325,6 @@ fn gauge(ring: &Ring, label: &str) -> gtk::Box {
     column
 }
 
-/// ssh config kaydinda alias yeterli; yerel kayitta user@host kuruyoruz.
-fn ssh_target(host: &Host) -> String {
-    match host.source {
-        crate::data::Source::SshConfig => host.alias.clone(),
-        crate::data::Source::Local => match &host.user {
-            Some(user) => format!("{user}@{}", host.hostname),
-            None => host.hostname.clone(),
-        },
-    }
-}
 
 pub fn build(store: Rc<RefCell<Store>>) -> Rc<Monitor> {
     let list = gtk::Box::new(gtk::Orientation::Vertical, 10);

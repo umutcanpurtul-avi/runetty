@@ -223,7 +223,10 @@ pub fn build(
     app_menu.append(Some("New Session"), Some("win.host-new"));
     app_menu.append(Some("New Folder"), Some("win.folder-new"));
     app_menu.append(Some("Reload ~/.ssh/config"), Some("win.reload-ssh-config"));
-    app_menu.append(Some("Restore Hidden"), Some("win.restore-hidden"));
+    app_menu.append(
+        Some("Gizlenen ssh config kayitlarini geri getir"),
+        Some("win.restore-hidden"),
+    );
     app_menu.append(Some("About runetty"), Some("win.about"));
     app_menu.append(Some("Quit"), Some("app.quit"));
 
@@ -499,9 +502,15 @@ impl Tabs {
 
         let page = self.view.append(&monitor.widget);
         page.set_title("Monitor");
+
+        // Defter secimden once yazilmali; ustelik ilk sayfa eklenirken
+        // TabView onu kendiliginden seciyor, yani secim sinyaline guvenip
+        // turu baslatmak yetmiyor — burada acikca baslatiyoruz.
+        *self.monitor_page.borrow_mut() = Some(page.clone());
+
         self.view.set_selected_page(&page);
         self.stack.set_visible_child_name("tabs");
-        *self.monitor_page.borrow_mut() = Some(page.clone());
+        monitor.set_active(true);
 
         let this = Rc::clone(self);
         let monitor = Rc::clone(monitor);
@@ -799,9 +808,17 @@ fn install_actions(w: Wiring) {
     {
         let store = Rc::clone(w.store);
         let refresh = Rc::clone(w.refresh);
+        let window = window.clone();
         restore.connect_activate(move |_, _| {
+            let count = store.borrow().hidden_count();
+            if count == 0 {
+                toast(&window, "Gizlenmis kayit yok");
+                return;
+            }
+
             store.borrow_mut().unhide_all();
             refresh();
+            toast(&window, &format!("{count} kayit geri getirildi"));
         });
     }
     add(&restore);
@@ -918,10 +935,28 @@ fn confirm_delete(
     dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
     dialog.set_close_response("cancel");
 
+    let parent = window.clone();
     dialog.connect_response(None, move |_, response| {
-        if response == "delete" {
-            store.borrow_mut().remove(&alias);
-            refresh();
+        if response != "delete" {
+            return;
+        }
+
+        let deleted = store.borrow_mut().remove(&alias);
+        refresh();
+
+        // Gizlenen kayit geri alinabilir; kullanici bunu menuden aramasin.
+        if deleted {
+            toast(&parent, &format!("\"{alias}\" silindi"));
+            return;
+        }
+
+        let toast = adw::Toast::new(&format!("\"{alias}\" listeden gizlendi"));
+        toast.set_button_label(Some("Geri al"));
+        toast.set_action_name(Some("win.restore-hidden"));
+        toast.set_timeout(6);
+
+        if let Some(overlay) = parent.content().and_downcast::<adw::ToastOverlay>() {
+            overlay.add_toast(toast);
         }
     });
 

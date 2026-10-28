@@ -11,7 +11,13 @@ pub fn schedule(window: &adw::ApplicationWindow, path: String) {
     let window = window.clone();
 
     // Ilk kare cizilmeden anlik goruntu bos cikar; bir frame clock turu bekle.
-    glib::timeout_add_local_once(Duration::from_millis(600), move || {
+    // Ag bekleyen ekranlari yakalamak icin gecikme uzatilabiliyor.
+    let delay = std::env::var("RUNETTY_SCREENSHOT_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(600);
+
+    glib::timeout_add_local_once(Duration::from_millis(delay), move || {
         match capture(&window) {
             Some(texture) => match texture.save_to_png(&path) {
                 Ok(()) => println!("runetty: {path}"),

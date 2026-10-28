@@ -58,25 +58,44 @@ impl Host {
         }
     }
 
-    /// ssh config'ten gelen kayitta alias'i kullan: Jump host, anahtar, keep-alive
-    /// gibi ayarlar zaten orada tanimli, komut satirinda tekrarlamayalim.
-    pub fn command(&self) -> String {
-        match self.source {
-            Source::SshConfig => format!("ssh {}", self.alias),
-            Source::Local => {
-                let mut cmd = String::from("ssh ");
-                if let Some(port) = self.port {
-                    if port != 22 {
-                        cmd.push_str(&format!("-p {port} "));
-                    }
-                }
-                if let Some(identity) = &self.identity_file {
-                    cmd.push_str(&format!("-i {} ", shell_quote(identity)));
-                }
-                cmd.push_str(&self.user_host_plain());
-                cmd
+    /// Baglanti icin gereken butun `ssh` argumanlari — hedef dahil.
+    ///
+    /// Terminal oturumu da Monitor olcumu de buradan besleniyor. Tek kaynak
+    /// olmasi onemli: port ve anahtar gibi alanlar bir tarafta unutulursa
+    /// Monitor yanlis sunucuya ya da yanlis kimlikle baglanir.
+    pub fn ssh_args(&self) -> Vec<String> {
+        let mut args: Vec<String> = vec!["ssh".into()];
+        args.extend(control_options());
+
+        if self.source == Source::SshConfig {
+            // Port, anahtar, jump host: hepsi ssh config'te tanimli.
+            args.push(self.alias.clone());
+            return args;
+        }
+
+        if let Some(port) = self.port {
+            if port != 22 {
+                args.push("-p".into());
+                args.push(port.to_string());
             }
         }
+
+        if let Some(identity) = &self.identity_file {
+            args.push("-i".into());
+            args.push(identity.clone());
+        }
+
+        args.push(self.user_host_plain());
+        args
+    }
+
+    /// Terminalde calistirilacak kabuk komutu.
+    pub fn command(&self) -> String {
+        self.ssh_args()
+            .iter()
+            .map(|arg| if needs_quoting(arg) { shell_quote(arg) } else { arg.clone() })
+            .collect::<Vec<String>>()
+            .join(" ")
     }
 
     fn user_host_plain(&self) -> String {
@@ -87,9 +106,52 @@ impl Host {
     }
 }
 
+fn needs_quoting(value: &str) -> bool {
+    value.contains(|c: char| c.is_whitespace() || "'\"$`\\;&|<>()*?[]{}".contains(c))
+}
+
 /// Dosya yolu bosluk ya da ozel karakter icerebilir; kabuga tek tirnakla gecir.
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Terminal oturumu ve Monitor turu ayni kalici kanali paylasiyor.
+/// Boylece kimlik dogrulama sunucu basina bir kez yapiliyor: ilk oturumda
+/// parola/anahtar verilince sonraki her baglanti ayni kanaldan geciyor.
+pub fn control_options() -> Vec<String> {
+    let Some(dir) = control_dir() else {
+        return Vec::new();
+    };
+    control_options_in(&dir)
+}
+
+fn control_options_in(dir: &std::path::Path) -> Vec<String> {
+    let path = format!("{}/cm-%C", dir.display());
+
+    // Unix soket yolu 108 bayt ile sinirli ve `%C` acilinca daha da uzuyor.
+    // Sinira yaklasiyorsa paylasimdan vazgec: yavas ama calisir, aksi halde
+    // ssh "ControlPath too long" deyip hic baglanmaz.
+    if path.len() + 24 >= 108 {
+        return Vec::new();
+    }
+
+    let _ = std::fs::create_dir_all(&dir);
+
+    vec![
+        "-o".into(),
+        format!("ControlPath={path}"),
+        "-o".into(),
+        "ControlMaster=auto".into(),
+        "-o".into(),
+        // Terminal kapansa bile kanal biraz yasasin: Monitor turu ve
+        // hemen ardindan acilan ikinci oturum yeniden parola istemesin.
+        "ControlPersist=600".into(),
+    ]
+}
+
+/// Unix soket yolu kisa olmali; `%C` zaten kisa bir hash.
+pub fn control_dir() -> Option<std::path::PathBuf> {
+    dirs::runtime_dir().or_else(dirs::cache_dir).map(|dir| dir.join("runetty"))
 }
 
 pub fn now() -> u64 {
@@ -112,5 +174,26 @@ pub fn relative(timestamp: Option<u64>) -> String {
         3600..=86_399 => format!("{}h", delta / 3600),
         86_400..=2_591_999 => format!("{}d", delta / 86_400),
         _ => format!("{}w", delta / 604_800),
+    }
+}
+
+#[cfg(test)]
+mod control_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn short_path_enables_sharing() {
+        let options = control_options_in(Path::new("/run/user/1000/runetty"));
+        assert!(options.iter().any(|option| option.starts_with("ControlPath=")));
+        assert!(options.iter().any(|option| option == "ControlMaster=auto"));
+    }
+
+    /// Unix soketi 108 bayt ile sinirli. "too long" deyip hic baglanamamaktansa
+    /// kanal paylasimindan vazgecip calismaya devam etmek daha iyi.
+    #[test]
+    fn overlong_path_disables_sharing_instead_of_failing() {
+        let deep = format!("/tmp/{}/runetty", "x".repeat(120));
+        assert!(control_options_in(Path::new(&deep)).is_empty());
     }
 }

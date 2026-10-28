@@ -43,11 +43,14 @@ pub struct Appearance {
 
 impl Default for Appearance {
     fn default() -> Self {
+        // Aile bos: style.css'teki yedek zinciri gecerli kalsin.
+        // Inter kurulu degilse zincir zaten bir sonrakine dusuyor; buraya
+        // sabit bir ad yazmak, kurulu olmayan fontu dayatmak olurdu.
         Self {
             theme: Theme::default(),
-            interface_font: "Inter".into(),
+            interface_font: String::new(),
             interface_size: 13.0,
-            terminal_font: "JetBrains Mono".into(),
+            terminal_font: String::new(),
             terminal_size: 11.0,
         }
     }
@@ -73,26 +76,35 @@ impl Appearance {
     }
 
     /// style.css'teki sabitleri ezen kucuk bir katman.
+    /// Aile bos birakildiysa o kurali hic yazmiyoruz: stylesheet'teki
+    /// yedek zinciri (Inter -> Adwaita Sans -> Cantarell) bozulmasin.
     pub fn css(&self) -> String {
-        let interface = quote_family(&self.interface_font);
-        let terminal = quote_family(&self.terminal_font);
+        let mut css = String::new();
 
-        format!(
-            "window.runetty {{ font-family: {interface}; font-size: {}px; }}\n\
-             .mono, .row-subtitle {{ font-family: {terminal}; }}\n",
-            self.interface_size
-        )
+        css.push_str(&match self.interface_font.trim() {
+            "" => format!("window.runetty {{ font-size: {}px; }}\n", self.interface_size),
+            family => format!(
+                "window.runetty {{ font-family: {}; font-size: {}px; }}\n",
+                quote_family(family),
+                self.interface_size
+            ),
+        });
+
+        if let family @ 1.. = self.terminal_font.trim().len() {
+            let _ = family;
+            css.push_str(&format!(
+                ".mono, .row-subtitle {{ font-family: {}; }}\n",
+                quote_family(&self.terminal_font)
+            ));
+        }
+
+        css
     }
 }
 
 /// Aile adi bosluk iceriyorsa tirnakla; yedek zinciri koru.
 fn quote_family(value: &str) -> String {
-    let value = value.trim();
-    if value.is_empty() {
-        return "\"Adwaita Sans\", Cantarell, sans-serif".into();
-    }
-
-    format!("\"{}\", \"Adwaita Sans\", Cantarell, sans-serif", value.replace('"', ""))
+    format!("\"{}\", \"Adwaita Sans\", Cantarell, sans-serif", value.trim().replace('"', ""))
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]

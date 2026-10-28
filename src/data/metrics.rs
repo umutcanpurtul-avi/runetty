@@ -5,8 +5,6 @@
 //! basina tek kalici kanal aciliyor; sonraki her turda ayni kanal kullaniliyor,
 //! yani maliyet bir komut calistirmaya iniyor.
 
-use std::path::PathBuf;
-
 /// Tek turda uzak tarafta calisan komut. Bolum basliklari ayristirmayi
 /// sabit tutuyor: cikti bicimi degisen araclara (top, vmstat) guvenmiyoruz.
 pub const PROBE: &str = "\
@@ -172,32 +170,26 @@ fn parse_cpu(line: &str) -> Option<CpuTimes> {
     Some(CpuTimes { total: values.iter().sum(), idle })
 }
 
-/// ControlMaster soketleri. Kisa tutulmali: ssh soket yolu uzunlugu sinirli.
-pub fn control_path() -> Option<PathBuf> {
-    let base = dirs::runtime_dir().or_else(dirs::cache_dir)?;
-    Some(base.join("runetty"))
-}
-
 /// Olcum komutunu kalici kanal uzerinden calistiran `ssh` argumanlari.
-pub fn probe_args(target: &str) -> Vec<String> {
-    let mut args: Vec<String> = vec!["ssh".into()];
+///
+/// Terminal oturumuyla ayni `ControlPath`: bir sekme aciksa olcum o kanaldan
+/// gecer ve hicbir kimlik dogrulama yapilmaz. Kanal yoksa parola keyring'den
+/// SSH_ASKPASS ile verilir — `BatchMode` bilerek kapali, cunku acikken
+/// kaydedilmis parola da kullanilamiyordu.
+pub fn probe_args(host: &super::Host) -> Vec<String> {
+    let mut args = host.ssh_args();
+    let target = args.pop().unwrap_or_default();
 
-    if let Some(dir) = control_path() {
-        let _ = std::fs::create_dir_all(&dir);
-        args.push("-o".into());
-        args.push(format!("ControlPath={}/cm-%C", dir.display()));
-        args.push("-o".into());
-        args.push("ControlMaster=auto".into());
-        args.push("-o".into());
-        args.push("ControlPersist=120".into());
-    }
-
-    // Monitor arka planda calisiyor: parola soramayiz, takilmak yerine dusmeli.
+    // Bilinmeyen sunucuyu arka planda sessizce kabul etmek istemiyoruz;
+    // guven karari kendi diyalogumuzda veriliyor.
     args.push("-o".into());
-    args.push("BatchMode=yes".into());
+    args.push("StrictHostKeyChecking=yes".into());
     args.push("-o".into());
     args.push("ConnectTimeout=5".into());
-    args.push(target.into());
+    args.push("-o".into());
+    args.push("NumberOfPasswordPrompts=1".into());
+
+    args.push(target);
     args.push(PROBE.into());
 
     args
@@ -469,8 +461,8 @@ pub fn human_kb(kilobytes: u64) -> String {
     "0 kB".into()
 }
 
-pub fn detail_args(target: &str) -> Vec<String> {
-    let mut args = probe_args(target);
+pub fn detail_args(host: &super::Host) -> Vec<String> {
+    let mut args = probe_args(host);
     args.pop();
     args.push(DETAIL_PROBE.into());
     args

@@ -239,6 +239,10 @@ impl Store {
     }
 
 
+    pub fn hidden_count(&self) -> usize {
+        self.file.hidden.len()
+    }
+
     /// Gizlenenleri geri getirir; "silmeyi geri al" icin.
     pub fn unhide_all(&mut self) {
         self.file.hidden.clear();

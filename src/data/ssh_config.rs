@@ -188,6 +188,10 @@ Host nas
     fn alias_without_hostname_falls_back() {
         let hosts = parse("Host box\n  User u\n", Path::new("/tmp/config"), 0);
         assert_eq!(hosts[0].hostname, "box");
-        assert_eq!(hosts[0].command(), "ssh box");
+        // Komut kalici kanal secenekleriyle birlikte uretiliyor; onemli
+        // olan hedefin alias olmasi, cunku digerlerini ssh config biliyor.
+        let command = hosts[0].command();
+        assert!(command.ends_with(" box"), "got {command}");
+        assert!(command.starts_with("ssh "));
     }
 }
