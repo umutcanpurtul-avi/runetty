@@ -162,7 +162,7 @@ mod tests {
         let text = "\
 # comment
 Host edge
-    HostName 10.10.10.21
+    HostName 192.0.2.21
     User root
     Port 2222
 
@@ -176,7 +176,7 @@ Host nas
         assert_eq!(hosts.len(), 2);
 
         assert_eq!(hosts[0].alias, "edge");
-        assert_eq!(hosts[0].hostname, "10.10.10.21");
+        assert_eq!(hosts[0].hostname, "192.0.2.21");
         assert_eq!(hosts[0].user.as_deref(), Some("root"));
         assert_eq!(hosts[0].port, Some(2222));
 
