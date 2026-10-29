@@ -1,3 +1,4 @@
+mod askpass;
 mod capture;
 mod config;
 mod data;
@@ -15,7 +16,7 @@ fn main() -> glib::ExitCode {
     if std::env::args().any(|arg| arg == "--askpass")
         || std::env::var_os("RUNETTY_ASKPASS_ALIAS").is_some()
     {
-        return askpass();
+        return askpass::run();
     }
 
     // Version queries and checks are safe once GTK is initialised.
@@ -132,20 +133,6 @@ fn check_runtime_versions() -> Result<(), String> {
     Ok(())
 }
 
-/// The SSH_ASKPASS protocol: print the password to stdout and nothing else.
-fn askpass() -> glib::ExitCode {
-    let Ok(alias) = std::env::var("RUNETTY_ASKPASS_ALIAS") else {
-        return glib::ExitCode::FAILURE;
-    };
-
-    match data::secrets::lookup(&alias) {
-        Some(password) => {
-            println!("{password}");
-            glib::ExitCode::SUCCESS
-        }
-        None => glib::ExitCode::FAILURE,
-    }
-}
 
 /// Reads an argument of the form `--flag value`.
 fn argument_value(flag: &str) -> Option<String> {
@@ -205,7 +192,7 @@ pub fn apply_user_css(css: &str) {
     });
 }
 
-fn load_stylesheet() {
+pub fn load_stylesheet() {
     let provider = gtk::CssProvider::new();
     provider.load_from_resource(&format!("{RESOURCE_PATH}/style.css"));
 

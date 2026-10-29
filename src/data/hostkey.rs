@@ -13,11 +13,14 @@ use std::process::Stdio;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Known {
-    /// Recorded in known_hosts; safe to connect straight away.
+    /// Recorded in known_hosts and still matching; safe to connect.
     Yes,
     /// Never seen; needs approval.
     No,
-    /// Undecidable (no ssh-keygen, etc.); leave it to ssh's own flow.
+    /// Recorded, but the host now presents a different key. Either the host
+    /// was rebuilt, an address was reused, or someone is in the middle.
+    Changed,
+    /// Undecidable (no ssh-keygen, no network); leave it to ssh's own flow.
     Unclear,
 }
 
@@ -43,19 +46,88 @@ pub fn status(host: &str, port: u16) -> Known {
         return Known::No;
     }
 
+    let recorded = recorded_keys(&path, host, port);
+    if recorded.is_empty() {
+        return Known::No;
+    }
+
+    // Recorded is not the same as current. A rebuilt host, a reused address or
+    // a man in the middle all look identical here, and ssh refuses to connect
+    // in every case - so the difference has to be surfaced, not assumed away.
+    let Ok(offered) = scan(host, port) else {
+        // No answer from the host: nothing to compare against.
+        return Known::Unclear;
+    };
+
+    if offered.iter().any(|key| recorded.contains(&key_material(key))) {
+        Known::Yes
+    } else {
+        Known::Changed
+    }
+}
+
+/// The key material (type + base64) of the entries known for this host.
+fn recorded_keys(path: &std::path::Path, host: &str, port: u16) -> Vec<String> {
     let output = std::process::Command::new("ssh-keygen")
         .arg("-F")
         .arg(lookup_name(host, port))
         .arg("-f")
-        .arg(&path)
+        .arg(path)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .output();
 
-    match output {
-        Ok(output) if output.status.success() && !output.stdout.is_empty() => Known::Yes,
-        Ok(_) => Known::No,
-        Err(_) => Known::Unclear,
+    let Ok(output) = output else { return Vec::new() };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(key_material)
+        .filter(|material| !material.is_empty())
+        .collect()
+}
+
+/// Drops the host field so entries can be compared regardless of how the
+/// host was written, including hashed known_hosts lines.
+fn key_material(line: &str) -> String {
+    line.split_whitespace().skip(1).take(2).collect::<Vec<&str>>().join(" ")
+}
+
+/// The keys currently recorded for a host, for showing what is being replaced.
+pub fn recorded_fingerprints(host: &str, port: u16) -> Vec<(String, String)> {
+    let Some(path) = known_hosts() else { return Vec::new() };
+
+    let lines: Vec<String> = recorded_keys(&path, host, port)
+        .into_iter()
+        .map(|material| format!("{host} {material}"))
+        .collect();
+
+    fingerprints(&lines)
+}
+
+/// Removes every recorded key for a host. Used only when the user accepts a
+/// changed key, so the new one does not collide with the old.
+pub fn forget(host: &str, port: u16) -> Result<(), String> {
+    let path = known_hosts().ok_or_else(|| "~/.ssh not found".to_string())?;
+
+    let status = std::process::Command::new("ssh-keygen")
+        .arg("-R")
+        .arg(lookup_name(host, port))
+        .arg("-f")
+        .arg(&path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| format!("could not run ssh-keygen: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("ssh-keygen could not remove the old key".into())
     }
 }
 
@@ -165,6 +237,21 @@ fn trust_into(path: &std::path::Path, keys: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn key_material_ignores_the_host_field() {
+        let a = "example.test ssh-ed25519 AAAAC3NzaC1lZDI1NTE5";
+        let b = "|1|hashed|form= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5";
+        assert_eq!(key_material(a), key_material(b));
+        assert_eq!(key_material(a), "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5");
+    }
+
+    /// A comment after the key must not change the comparison.
+    #[test]
+    fn key_material_stops_after_the_key() {
+        let with_comment = "example.test ssh-rsa AAAAB3Nza comment here";
+        assert_eq!(key_material(with_comment), "ssh-rsa AAAAB3Nza");
+    }
 
     #[test]
     fn port_is_part_of_the_lookup_name() {
