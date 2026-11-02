@@ -111,7 +111,8 @@ fn hint_row() -> gtk::Box {
     let hints: &[(&str, &str)] = &[
         ("Ctrl K", "command palette"),
         ("Ctrl B", "sidebar"),
-        ("Ctrl W", "close tab"),
+        ("Ctrl Shift C", "copy"),
+        ("Ctrl Shift V", "paste"),
     ];
 
     for (index, (keys, what)) in hints.iter().enumerate() {

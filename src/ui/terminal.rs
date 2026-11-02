@@ -111,10 +111,108 @@ where
 
     term.connect_child_exited(move |_, status| on_status(status));
 
+    attach_clipboard(&term);
+
     let scroller = gtk::ScrolledWindow::new();
     scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
     scroller.set_child(Some(&term));
     scroller.upcast()
+}
+
+/// Copy and paste inside the terminal.
+///
+/// Plain Ctrl+C and Ctrl+V belong to the shell: Ctrl+C interrupts, Ctrl+V
+/// quotes the next character. So the clipboard uses the shifted pair every
+/// terminal emulator uses, plus the Insert variants some people reach for,
+/// plus a context menu for anyone who reaches for neither.
+fn attach_clipboard(term: &vte::Terminal) {
+    let keys = gtk::EventControllerKey::new();
+
+    keys.connect_key_pressed(|controller, key, _, state| {
+        let Some(term) = controller.widget().and_downcast::<vte::Terminal>() else {
+            return glib::Propagation::Proceed;
+        };
+
+        let control = state.contains(gdk::ModifierType::CONTROL_MASK);
+        let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
+
+        match key {
+            gdk::Key::C | gdk::Key::c if control && shift => {
+                copy(&term);
+                glib::Propagation::Stop
+            }
+            gdk::Key::V | gdk::Key::v if control && shift => {
+                term.paste_clipboard();
+                glib::Propagation::Stop
+            }
+            gdk::Key::Insert if control => {
+                copy(&term);
+                glib::Propagation::Stop
+            }
+            gdk::Key::Insert if shift => {
+                term.paste_clipboard();
+                glib::Propagation::Stop
+            }
+            gdk::Key::A | gdk::Key::a if control && shift => {
+                term.select_all();
+                glib::Propagation::Stop
+            }
+            _ => glib::Propagation::Proceed,
+        }
+    });
+
+    term.add_controller(keys);
+    attach_context_menu(term);
+}
+
+/// Copying with nothing selected would clear the clipboard, which is never
+/// what the keystroke meant.
+fn copy(term: &vte::Terminal) {
+    if term.has_selection() {
+        term.copy_clipboard_format(vte::Format::Text);
+    }
+}
+
+fn attach_context_menu(term: &vte::Terminal) {
+    let menu = gio::Menu::new();
+    menu.append(Some("Copy"), Some("term.copy"));
+    menu.append(Some("Paste"), Some("term.paste"));
+    menu.append(Some("Select All"), Some("term.select-all"));
+
+    let actions = gio::SimpleActionGroup::new();
+
+    let entries: [(&str, fn(&vte::Terminal)); 3] = [
+        ("copy", copy),
+        ("paste", |term| term.paste_clipboard()),
+        ("select-all", |term| term.select_all()),
+    ];
+
+    for (name, action) in entries {
+        let entry = gio::SimpleAction::new(name, None);
+        let term = term.clone();
+        entry.connect_activate(move |_, _| action(&term));
+        actions.add_action(&entry);
+    }
+
+    term.insert_action_group("term", Some(&actions));
+
+    // Built per click and unparented on close. A popover kept alive on the
+    // terminal would outlive the tab it belongs to and be left orphaned when
+    // the tab closes.
+    let gesture = gtk::GestureClick::new();
+    gesture.set_button(gdk::BUTTON_SECONDARY);
+    gesture.connect_pressed(move |gesture, _, x, y| {
+        let Some(term) = gesture.widget() else { return };
+
+        let popover = gtk::PopoverMenu::from_model(Some(&menu));
+        popover.set_parent(&term);
+        popover.set_has_arrow(false);
+        popover.set_halign(gtk::Align::Start);
+        popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        popover.connect_closed(|popover| popover.unparent());
+        popover.popup();
+    });
+    term.add_controller(gesture);
 }
 
 /// Changes the font of open tabs in place.

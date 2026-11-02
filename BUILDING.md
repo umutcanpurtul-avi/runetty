@@ -120,6 +120,21 @@ A unix socket path is capped at 108 bytes. When the control path would exceed
 that, sharing is disabled silently — slower, but it still connects, which
 beats ssh refusing with "ControlPath too long".
 
+## Terminal shortcuts
+
+Plain Ctrl+C and Ctrl+V belong to the shell - Ctrl+C interrupts, Ctrl+V
+quotes the next character - so the clipboard uses the shifted pair, as in
+every other terminal emulator.
+
+| Keys | Action |
+| --- | --- |
+| Ctrl+Shift+C, Ctrl+Insert | Copy the selection |
+| Ctrl+Shift+V, Shift+Insert | Paste |
+| Ctrl+Shift+A | Select all |
+
+Right-clicking the terminal offers the same three. Selecting text also puts
+it on the primary selection, so middle-click paste works as usual.
+
 ## Fonts
 
 Inter for the interface, JetBrains Mono for identifiers. Without them the
