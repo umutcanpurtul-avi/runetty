@@ -26,13 +26,27 @@ jobs:
         run: |
           set -eux
           if command -v pacman >/dev/null; then
-            pacman -Sy --noconfirm --needed git
+            pacman -Sy --noconfirm --needed git curl
           else
-            apt-get update && apt-get install -y --no-install-recommends git ca-certificates sudo
+            apt-get update
+            apt-get install -y --no-install-recommends git curl ca-certificates sudo
           fi
       - uses: actions/checkout@v4
       - name: Dependencies
         run: ./build-aux/install-deps.sh
+
+      # install-deps.sh deliberately leaves rustc to rustup on Debian and
+      # Ubuntu, whose packaged toolchain is far below the 1.92 gtk4-sys needs.
+      # Arch ships a current one, so this is a no-op there.
+      - name: Rust toolchain
+        run: |
+          set -eux
+          if ! command -v cargo >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain stable --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
       - name: Build
         run: cargo build --release --locked
       - name: Build without terminal
@@ -42,7 +56,8 @@ jobs:
   flatpak:
     runs-on: ubuntu-latest
     container:
-      image: bilelmoussaoui/flatpak-github-actions:gnome-48
+      # Renamed upstream; the old bilelmoussaoui image no longer resolves.
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-48
       options: --privileged
     steps:
       - uses: actions/checkout@v4
