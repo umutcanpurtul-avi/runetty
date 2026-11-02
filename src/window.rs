@@ -13,7 +13,7 @@ use crate::data::sessions::{self, Sessions};
 use crate::data::settings::{Settings, Theme};
 use crate::data::store::Store;
 use crate::ui::{
-    agents, empty_state, host_dialog, icon_rail, monitor, preferences, sidebar,
+    agents, empty_state, host_dialog, icon_rail, monitor, preferences, shortcuts, sidebar,
     trust_dialog,
 };
 
@@ -251,6 +251,7 @@ pub fn build(
         Some("Restore hidden ssh config records"),
         Some("win.restore-hidden"),
     );
+    app_menu.append(Some("Keyboard Shortcuts"), Some("win.shortcuts"));
     app_menu.append(Some("About runetty"), Some("win.about"));
     app_menu.append(Some("Quit"), Some("app.quit"));
 
@@ -585,6 +586,36 @@ impl Tabs {
                 view.disconnect(id);
             }
         }));
+    }
+
+    fn close_current(&self) {
+        if let Some(page) = self.view.selected_page() {
+            self.view.close_page(&page);
+        }
+    }
+
+    /// Wraps around, so repeated presses cycle rather than stopping at an end.
+    fn step(&self, forward: bool) {
+        let count = self.view.n_pages();
+        if count < 2 {
+            return;
+        }
+
+        let Some(current) = self.view.selected_page() else { return };
+        let index = self.view.page_position(&current);
+        let next = if forward {
+            (index + 1) % count
+        } else {
+            (index - 1 + count) % count
+        };
+
+        self.view.set_selected_page(&self.view.nth_page(next));
+    }
+
+    fn select_nth(&self, index: i32) {
+        if index >= 0 && index < self.view.n_pages() {
+            self.view.set_selected_page(&self.view.nth_page(index));
+        }
     }
 
     /// Focuses an open session if there is one and returns `true`.
@@ -955,6 +986,46 @@ fn install_actions(w: Wiring) {
         });
     }
     add(&toggle_pin);
+
+    let shortcuts = gio::SimpleAction::new("shortcuts", None);
+    {
+        let window = window.clone();
+        shortcuts.connect_activate(move |_, _| shortcuts::present(&window));
+    }
+    add(&shortcuts);
+
+    let close_tab = gio::SimpleAction::new("close-tab", None);
+    {
+        let tabs = Rc::clone(w.tabs);
+        close_tab.connect_activate(move |_, _| tabs.close_current());
+    }
+    add(&close_tab);
+
+    let next_tab = gio::SimpleAction::new("next-tab", None);
+    {
+        let tabs = Rc::clone(w.tabs);
+        next_tab.connect_activate(move |_, _| tabs.step(true));
+    }
+    add(&next_tab);
+
+    let previous_tab = gio::SimpleAction::new("previous-tab", None);
+    {
+        let tabs = Rc::clone(w.tabs);
+        previous_tab.connect_activate(move |_, _| tabs.step(false));
+    }
+    add(&previous_tab);
+
+    // One action with an index, so nine accelerators share one handler.
+    let select_tab = gio::SimpleAction::new("select-tab", Some(glib::VariantTy::INT32));
+    {
+        let tabs = Rc::clone(w.tabs);
+        select_tab.connect_activate(move |_, target| {
+            if let Some(index) = target.and_then(glib::Variant::get::<i32>) {
+                tabs.select_nth(index);
+            }
+        });
+    }
+    add(&select_tab);
 
     let palette = gio::SimpleAction::new("command-palette", None);
     palette.connect_activate(|_, _| glib::g_debug!("runetty", "TODO: command palette"));

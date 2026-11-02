@@ -108,11 +108,11 @@ fn hint_row() -> gtk::Box {
     row.set_halign(gtk::Align::Center);
     row.add_css_class("hint-row");
 
+    // Super K first: it is the way to find everything else.
     let hints: &[(&str, &str)] = &[
+        ("Super K", "all shortcuts"),
         ("Ctrl K", "command palette"),
         ("Ctrl B", "sidebar"),
-        ("Ctrl Shift C", "copy"),
-        ("Ctrl Shift V", "paste"),
     ];
 
     for (index, (keys, what)) in hints.iter().enumerate() {

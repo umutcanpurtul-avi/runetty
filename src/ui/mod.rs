@@ -6,6 +6,7 @@ pub mod preferences;
 pub mod ring;
 pub mod monitor;
 pub mod rows;
+pub mod shortcuts;
 pub mod sidebar;
 pub mod trust_dialog;
 

@@ -211,9 +211,28 @@ fn register_icons() {
 }
 
 fn setup_accels(app: &adw::Application) {
+    // Super+K is what was asked for; Ctrl+? and F1 are the conventional
+    // fallbacks, and some desktops reserve Super for themselves.
+    app.set_accels_for_action("win.shortcuts", &["<Super>k", "<Control>question", "F1"]);
+
     app.set_accels_for_action("win.global-search", &["<Shift><Control>k"]);
     app.set_accels_for_action("win.command-palette", &["<Control>k"]);
     app.set_accels_for_action("win.toggle-sidebar", &["<Control>b"]);
-    app.set_accels_for_action("window.close", &["<Control>w"]);
+    app.set_accels_for_action("win.preferences", &["<Control>comma"]);
+    app.set_accels_for_action("win.host-new", &["<Control>n"]);
+    app.set_accels_for_action("win.reconnect", &["<Control>r"]);
+
+    // Ctrl+W closed the window before, not the tab, despite what the hint said.
+    app.set_accels_for_action("win.close-tab", &["<Control>w"]);
+    app.set_accels_for_action("win.next-tab", &["<Control>Page_Down"]);
+    app.set_accels_for_action("win.previous-tab", &["<Control>Page_Up"]);
+
+    for index in 1..=9 {
+        app.set_accels_for_action(
+            &format!("win.select-tab({})", index - 1),
+            &[&format!("<Alt>{index}")],
+        );
+    }
+
     app.set_accels_for_action("app.quit", &["<Control>q"]);
 }
