@@ -4,6 +4,7 @@ pub mod host_dialog;
 pub mod icon_rail;
 pub mod palette;
 pub mod preferences;
+pub mod probe;
 pub mod ring;
 pub mod monitor;
 pub mod rows;

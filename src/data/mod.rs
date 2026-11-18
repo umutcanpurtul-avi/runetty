@@ -115,6 +115,27 @@ impl Host {
         args
     }
 
+    /// Starts `ssh -O <command>` on this host's shared channel, if it has one.
+    ///
+    /// `stop` refuses new sessions but lets open ones finish: what should
+    /// happen when a password is forgotten or a record deleted, so the next
+    /// connection has to authenticate again. `exit` ends the channel and
+    /// everything on it, for when runetty itself quits.
+    pub fn release_channel(&self, command: &str) -> Option<std::process::Child> {
+        if control_options().is_empty() {
+            return None;
+        }
+
+        let args = self.ssh_invocation(&["-O", command], &[]);
+        std::process::Command::new(&args[0])
+            .args(&args[1..])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .ok()
+    }
+
     /// Every `ssh` argument needed for an interactive session.
     pub fn ssh_args(&self) -> Vec<String> {
         self.ssh_invocation(&[], &[])
@@ -193,9 +214,10 @@ fn control_options_in(dir: &std::path::Path) -> Vec<String> {
         "-o".into(),
         "ControlMaster=auto".into(),
         "-o".into(),
-        // Keep the channel alive briefly after the terminal closes, so a Monitor
-        // probe or a second session opened right after need not re-authenticate.
-        "ControlPersist=600".into(),
+        // Keep the channel alive briefly after the terminal closes, so a second
+        // session opened right after need not re-authenticate. Monitor probes
+        // keep it in use while a host is watched; runetty closes it on quit.
+        "ControlPersist=120".into(),
     ]
 }
 

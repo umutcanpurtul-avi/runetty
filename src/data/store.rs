@@ -63,7 +63,17 @@ impl Store {
             .and_then(|text| match toml::from_str(&text) {
                 Ok(parsed) => Some(parsed),
                 Err(error) => {
-                    eprintln!("runetty: could not read hosts.toml: {error}");
+                    // The first save would replace the file with whatever is
+                    // left; keep the original so nothing is lost for good.
+                    let backup = path.as_ref().map(|path| path.with_extension("toml.bak"));
+                    let kept = path
+                        .as_ref()
+                        .zip(backup.as_ref())
+                        .is_some_and(|(path, backup)| std::fs::copy(path, backup).is_ok());
+                    eprintln!(
+                        "runetty: could not read hosts.toml: {error}{}",
+                        if kept { " (a copy was kept as hosts.toml.bak)" } else { "" }
+                    );
                     None
                 }
             })
@@ -234,6 +244,7 @@ impl Store {
     /// Real deletion for a local record, hiding for an ssh config one.
     /// Returns whether it was actually deleted (false means hidden).
     pub fn remove(&mut self, alias: &str) -> bool {
+        let host = self.hosts().into_iter().find(|host| host.alias == alias);
         let before = self.file.hosts.len();
         self.file.hosts.retain(|host| host.alias != alias);
         let deleted = self.file.hosts.len() != before;
@@ -249,8 +260,13 @@ impl Store {
         self.file.monitored.retain(|name| name != alias);
         // If the record goes, its password should not linger in the keyring.
         // With no persistent storage (tests) we leave the keyring alone.
+        // An authenticated channel would otherwise keep letting new sessions
+        // in without a password for a while.
         if self.path.is_some() {
             let _ = super::secrets::clear(alias);
+            if let Some(mut channel) = host.and_then(|host| host.release_channel("stop")) {
+                let _ = channel.wait();
+            }
         }
         self.save();
         deleted

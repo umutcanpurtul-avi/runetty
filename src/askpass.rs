@@ -74,6 +74,10 @@ enum Ask {
     /// keyboard-interactive text, a jump host's password, a key we did not
     /// expect. Shown with where it came from, and never stored.
     Untrusted(String),
+    /// ssh's own "do you trust this host key?" question. runetty checks keys
+    /// before connecting, but not for hosts behind a jump host or proxy: only
+    /// ssh knows which machine it reached there, so the question is passed on.
+    HostKey,
     /// Not a secret at all.
     Refuse,
 }
@@ -95,20 +99,26 @@ fn password_prompt(prompt: &str) -> Option<&str> {
 fn classify(prompt: &str, context: &Context) -> Ask {
     let lower = prompt.to_lowercase();
 
-    // The host key question is a yes/no, never a secret.
-    if lower.contains("yes/no") || lower.contains("fingerprint") {
-        return Ask::Refuse;
-    }
-
     // Server-written text first: a server can phrase its prompt to look like
     // anything, including a local passphrase request naming one of our key
-    // files. Only the plain password of the right host is answered for it.
+    // files or ssh's own host key question. Only the plain password of the
+    // right host is answered for it.
     if let Some((who, text)) = server_prompt(prompt) {
         let text = text.to_lowercase();
         if context.is_target(who) && text.contains("password") && !text.contains("passphrase") {
             return Ask::Password;
         }
         return Ask::Untrusted(format!("{who} asks"));
+    }
+
+    // A yes/no is never a secret. The one ssh asks about a new host key is
+    // put to the user; any other is refused.
+    if lower.contains("yes/no") || lower.contains("fingerprint") {
+        return if lower.starts_with("the authenticity of host") && lower.contains("(yes/no") {
+            Ask::HostKey
+        } else {
+            Ask::Refuse
+        };
     }
 
     if lower.contains("passphrase") {
@@ -155,6 +165,7 @@ pub fn run() -> glib::ExitCode {
         },
         // Asked of the user, never looked up and never remembered.
         Ask::Untrusted(source) => return ask(&prompt, None, Some(&source)),
+        Ask::HostKey => return confirm_host_key(&prompt),
         Ask::Refuse => return glib::ExitCode::FAILURE,
     };
 
@@ -164,6 +175,91 @@ pub fn run() -> glib::ExitCode {
     }
 
     ask(&prompt, Some(&alias), None)
+}
+
+/// A label that shows its text literally - no markup, no mnemonics.
+fn plain_label(text: Option<&str>) -> gtk::Label {
+    let label = gtk::Label::new(text);
+    label.set_use_markup(false);
+    label.set_use_underline(false);
+    label.set_wrap(true);
+    label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    label.set_xalign(0.0);
+    label
+}
+
+/// The prompt as it is safe to show: control and bidi-override characters
+/// dropped (a server could send escape sequences or reorder what the user
+/// reads) and the length capped.
+fn displayable(prompt: &str) -> Option<String> {
+    const LIMIT: usize = 400;
+
+    let text: String = prompt
+        .trim()
+        .chars()
+        .filter(|c| *c == '\n' || !c.is_control())
+        .filter(|c| !matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}'))
+        .collect();
+    if text.is_empty() {
+        return None;
+    }
+    Some(match text.char_indices().nth(LIMIT) {
+        Some((cut, _)) => format!("{}\u{2026}", &text[..cut]),
+        None => text,
+    })
+}
+
+/// Puts ssh's host key question to the user. "yes" makes ssh record the key
+/// itself, honouring HashKnownHosts and the rest of its configuration; a
+/// cancel makes it give up.
+fn confirm_host_key(prompt: &str) -> glib::ExitCode {
+    if gtk::init().is_err() {
+        return glib::ExitCode::FAILURE;
+    }
+    adw::init().ok();
+
+    crate::load_stylesheet();
+
+    let trusted = std::rc::Rc::new(std::cell::Cell::new(false));
+
+    let dialog = adw::AlertDialog::new(Some("Unknown host"), None);
+    // The question ends in ssh's "(yes/no/[fingerprint])?", which the buttons
+    // answer; showing it would invite typing.
+    let question = prompt.rsplit_once("Are you sure").map_or(prompt, |(text, _)| text);
+    let message = plain_label(displayable(question).as_deref());
+    message.add_css_class("mono");
+    dialog.set_extra_child(Some(&message));
+    dialog.add_response("cancel", "Cancel");
+    dialog.add_response("trust", "Trust and connect");
+    dialog.set_response_appearance("trust", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+
+    let loop_ = glib::MainLoop::new(None, false);
+    {
+        let trusted = std::rc::Rc::clone(&trusted);
+        let loop_ = loop_.clone();
+        dialog.connect_response(None, move |_, response| {
+            trusted.set(response == "trust");
+            loop_.quit();
+        });
+    }
+
+    let window = adw::ApplicationWindow::builder()
+        .default_width(480)
+        .title("runetty")
+        .build();
+    window.add_css_class("runetty");
+    window.present();
+    dialog.present(Some(&window));
+    loop_.run();
+
+    if trusted.get() {
+        println!("yes");
+        glib::ExitCode::SUCCESS
+    } else {
+        glib::ExitCode::FAILURE
+    }
 }
 
 /// A minimal password window. Returning failure makes ssh give up, which is
@@ -199,28 +295,24 @@ fn ask(prompt: &str, store_as: Option<&str>, source: Option<&str>) -> glib::Exit
     remember.set_title("Remember in the keyring");
     remember.set_active(true);
 
-    let group = adw::PreferencesGroup::new();
+    // Plain labels, never markup: the prompt can be text a server wrote, and
+    // AdwPreferencesGroup renders its title and description as Pango markup.
+    let heading = plain_label(source.map(|source| format!("{source}:")).as_deref());
+    heading.add_css_class("heading");
 
-    match source {
+    let message = plain_label(Some(&match source {
         // Text from the far side is shown as a quotation from someone else,
         // not as runetty speaking.
-        Some(source) => {
-            group.set_title(&format!("{source}:"));
-            group.set_description(Some(&format!(
-                "\u{201c}{}\u{201d}\n\nThis text comes from the other end of the \
-                 connection, not from runetty. Only answer if you expected it.",
-                if prompt.is_empty() { "(no text)" } else { prompt.trim() }
-            )));
-        }
-        None => {
-            group.set_description(Some(if prompt.is_empty() {
-                "ssh is asking for a secret."
-            } else {
-                prompt
-            }));
-        }
-    }
+        Some(_) => format!(
+            "\u{201c}{}\u{201d}\n\nThis text comes from the other end of the \
+             connection, not from runetty. Only answer if you expected it.",
+            displayable(prompt).unwrap_or_else(|| "(no text)".into())
+        ),
+        None => displayable(prompt).unwrap_or_else(|| "ssh is asking for a secret.".into()),
+    }));
+    message.add_css_class("dim-label");
 
+    let group = adw::PreferencesGroup::new();
     group.add(&entry);
     if store_as.is_some() {
         group.add(&remember);
@@ -240,6 +332,10 @@ fn ask(prompt: &str, store_as: Option<&str>, source: Option<&str>) -> glib::Exit
     body.set_margin_bottom(16);
     body.set_margin_start(16);
     body.set_margin_end(16);
+    if source.is_some() {
+        body.append(&heading);
+    }
+    body.append(&message);
     body.append(&group);
     body.append(&buttons);
 
@@ -408,11 +504,21 @@ mod tests {
     }
 
     #[test]
-    fn the_host_key_question_is_refused() {
+    fn the_host_key_question_goes_to_the_user() {
         let prompt = "The authenticity of host '10.0.0.1' can't be established.\n\
                       ED25519 key fingerprint is SHA256:abc.\n\
                       Are you sure you want to continue connecting (yes/no/[fingerprint])? ";
-        assert_eq!(classify(prompt, &edge()), Ask::Refuse);
+        assert_eq!(classify(prompt, &edge()), Ask::HostKey);
+    }
+
+    /// A server cannot pose as ssh asking about a key, and other yes/no
+    /// questions are not put to the user at all.
+    #[test]
+    fn only_ssh_itself_asks_about_host_keys() {
+        let posing = "(admin@web) The authenticity of host 'x' can't be established.\n\
+                      Are you sure you want to continue connecting (yes/no)? ";
+        assert_eq!(classify(posing, &edge()), Ask::Untrusted("admin@web asks".into()));
+        assert_eq!(classify("Allow this (yes/no)? ", &edge()), Ask::Refuse);
     }
 
     #[test]
@@ -425,5 +531,14 @@ mod tests {
     #[test]
     fn passphrase_alias_is_per_key_file() {
         assert_eq!(passphrase_alias("/home/u/.ssh/id_ed25519"), "key:/home/u/.ssh/id_ed25519");
+    }
+
+    #[test]
+    fn server_text_is_shown_without_its_tricks() {
+        assert_eq!(displayable("  \x1b[31mred\u{202e}txt.exe  "), Some("[31mredtxt.exe".into()));
+        assert_eq!(displayable("\x07\x08"), None);
+        assert_eq!(displayable(&"a".repeat(1000)).map(|t| t.chars().count()), Some(401));
+        // Markup is not interpreted by the label; it only has to survive intact.
+        assert_eq!(displayable("<b>Password</b>"), Some("<b>Password</b>".into()));
     }
 }

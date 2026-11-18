@@ -11,6 +11,10 @@ use gtk::{gio, glib};
 use config::{APP_ID, MIN_ADW, MIN_GTK, RESOURCE_PATH, VERSION};
 
 fn main() -> glib::ExitCode {
+    // First: the askpass window uses the stylesheet too.
+    gio::resources_register_include!("runetty.gresource")
+        .expect("could not load embedded resources");
+
     // Invoked as ssh's SSH_ASKPASS: read the password from the keyring and
     // print it. Before GTK starts, since there is no window here.
     if std::env::args().any(|arg| arg == "--askpass")
@@ -44,9 +48,6 @@ fn main() -> glib::ExitCode {
         eprintln!("Fix: use the Flatpak build for your distribution (see BUILDING.md).");
         return glib::ExitCode::FAILURE;
     }
-
-    gio::resources_register_include!("runetty.gresource")
-        .expect("could not load embedded resources");
 
     let screenshot = argument_value("--screenshot");
     let exec = argument_value("--exec");
@@ -106,6 +107,22 @@ fn main() -> glib::ExitCode {
             capture::schedule(&window, path);
         }
     });
+
+    // Authenticated channels outlive their sessions by ControlPersist; once
+    // runetty is gone nobody expects them to. A development instance runs
+    // alongside the real one and shares its channels, so it leaves them be.
+    if !flags.contains(gio::ApplicationFlags::NON_UNIQUE) {
+        app.connect_shutdown(|_| {
+            let channels: Vec<std::process::Child> = data::store::Store::load()
+                .hosts()
+                .iter()
+                .filter_map(|host| host.release_channel("exit"))
+                .collect();
+            for mut channel in channels {
+                let _ = channel.wait();
+            }
+        });
+    }
 
     // We parse arguments ourselves; GApplication must not see unknown flags.
     app.run_with_args::<&str>(&[])

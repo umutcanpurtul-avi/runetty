@@ -149,6 +149,10 @@ pub fn probe_args(host: &Host) -> Vec<String> {
             "ConnectTimeout=5",
             "-o",
             "NumberOfPasswordPrompts=1",
+            "-o",
+            "ServerAliveInterval=5",
+            "-o",
+            "ServerAliveCountMax=2",
         ],
         &[PROBE],
     )

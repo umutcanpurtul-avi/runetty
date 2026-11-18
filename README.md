@@ -164,7 +164,9 @@ runetty handles your server access, so here is exactly what it does with it.
 | **Passwords** | Stored in the system keyring (Secret Service — GNOME Keyring or KWallet). Never written to any file. |
 | **Passing secrets to ssh** | Through `SSH_ASKPASS`, so a password never appears on a command line or in `ps`. No `sshpass`. |
 | **Which prompt gets which secret** | askpass is told which host a connection is for. A saved password answers only that host's own prompt - never a jump host's, never another server's. A saved passphrase answers only ssh's own request for a key this connection uses - never text a server sent. Anything else is shown to you, marked with who is asking, and cannot be saved. |
-| **Host keys** | Fetched with `ssh-keyscan`, fingerprint shown, saved to `known_hosts` **only after you approve**. Never auto-accepted. |
+| **Host keys** | Checked against what `ssh -G` says ssh will use (`HostKeyAlias`, port, `HashKnownHosts`, known_hosts files). Fetched with `ssh-keyscan`, fingerprint shown, saved **only after you approve**. Behind a jump host or proxy, ssh's own question is shown instead. Never auto-accepted. |
+| **Shared connections** | Sessions to one host share an authenticated channel. Forgetting a password or deleting a record stops it taking new sessions; quitting runetty closes it. |
+| **Monitor and Agents** | Background probes give up after 10 seconds and refuse output past 256 KiB, so a misbehaving host cannot hang or flood runetty. |
 | **`~/.ssh/config`** | Read-only. Deleting a record from it only hides it in runetty (and can be undone), because `ssh`, `scp` and `rsync` use that file too. |
 | **Remote footprint** | None. Monitor reads `/proc` and `df`; Agents runs `tmux list-sessions`. No daemon, no agent, no install. |
 | **Network** | Only the SSH connections you open or the hosts you explicitly watch. No telemetry. |

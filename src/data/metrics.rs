@@ -245,6 +245,12 @@ const BACKGROUND_OPTIONS: &[&str] = &[
     "ConnectTimeout=5",
     "-o",
     "NumberOfPasswordPrompts=1",
+    // A host that stops answering mid-probe is noticed in seconds, not when
+    // TCP gives up.
+    "-o",
+    "ServerAliveInterval=5",
+    "-o",
+    "ServerAliveCountMax=2",
 ];
 
 #[cfg(test)]

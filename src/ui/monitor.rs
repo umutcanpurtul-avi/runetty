@@ -10,8 +10,9 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use adw::prelude::*;
-use gtk::{gio, glib};
+use gtk::glib;
 
+use super::probe;
 use super::ring::Ring;
 use crate::data::metrics::{self, CpuTimes};
 use crate::data::store::Store;
@@ -201,7 +202,7 @@ impl Monitor {
             };
 
             glib::spawn_future_local(async move {
-                let result = run(&command, &card.environment).await;
+                let result = probe::run(&command, &card.environment).await;
                 card.busy.set(false);
 
                 let output = match result {
@@ -326,46 +327,6 @@ impl Card {
     }
 }
 
-async fn run(command: &[String], environment: &[(String, String)]) -> Result<String, String> {
-    let args: Vec<&std::ffi::OsStr> =
-        command.iter().map(|part| std::ffi::OsStr::new(part)).collect();
-
-    let launcher = gio::SubprocessLauncher::new(
-        gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_PIPE,
-    );
-
-    // With no channel open yet, the keyring may answer - but only for this
-    // host, which is what the environment tells askpass.
-    for (key, value) in environment {
-        launcher.setenv(std::ffi::OsStr::new(key), std::ffi::OsStr::new(value), true);
-    }
-
-    let process = launcher
-        .spawn(&args)
-        .map_err(|error| error.message().to_string())?;
-
-    let (stdout, stderr) = process
-        .communicate_utf8_future(None)
-        .await
-        .map_err(|error| error.message().to_string())?;
-
-    if process.is_successful() {
-        return Ok(stdout.map(|text| text.to_string()).unwrap_or_default());
-    }
-
-    // ssh's own message is what helps the user; the first line is enough.
-    let message = stderr
-        .map(|text| text.to_string())
-        .unwrap_or_default()
-        .lines()
-        .next()
-        .unwrap_or("connection failed")
-        .trim()
-        .to_string();
-
-    Err(if message.is_empty() { "connection failed".into() } else { message })
-}
-
 fn build_card(host: &Host, stacked: Rc<Cell<bool>>) -> Card {
     let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
     widget.add_css_class("monitor-card");
@@ -485,7 +446,7 @@ fn build_card(host: &Host, stacked: Rc<Cell<bool>>) -> Card {
         let button = button.clone();
         let error_box = error_box.clone();
         glib::spawn_future_local(async move {
-            let result = run(&command, &environment).await;
+            let result = probe::run(&command, &environment).await;
             button.set_sensitive(true);
             if result.is_ok() {
                 error_box.set_visible(false);
@@ -530,7 +491,7 @@ fn refresh_detail(card: &Rc<Card>) {
     let card = Rc::clone(card);
     let command = card.detail_command.clone();
     glib::spawn_future_local(async move {
-        let result = run(&command, &card.environment).await;
+        let result = probe::run(&command, &card.environment).await;
         card.busy.set(false);
 
         match result.ok().and_then(|output| metrics::parse_detail(&output)) {

@@ -84,12 +84,7 @@ pub fn build(
             let host = store.borrow().hosts().into_iter().find(|host| host.alias == alias);
             let Some(host) = host else { return };
 
-            trust_dialog::ensure_trusted(
-                &window,
-                &host.hostname,
-                host.port.unwrap_or(22),
-                move || proceed(),
-            );
+            trust_dialog::ensure_trusted(&window, &host, move || proceed());
         })
     };
 

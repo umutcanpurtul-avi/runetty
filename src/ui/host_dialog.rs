@@ -186,13 +186,17 @@ pub fn present_in_folder<F>(
     }
 
     {
-        let alias = existing.as_ref().map(|host| host.alias.clone());
+        let host = existing.clone();
         let password = password.clone();
         forget.connect_clicked(move |button| {
-            if let Some(alias) = &alias {
-                if let Err(error) = secrets::clear(alias) {
+            if let Some(host) = &host {
+                if let Err(error) = secrets::clear(&host.alias) {
                     eprintln!("runetty: could not clear password: {error}");
                     return;
+                }
+                // Open sessions stay; a new one has to authenticate again.
+                if let Some(mut channel) = host.release_channel("stop") {
+                    let _ = channel.wait();
                 }
             }
             password.set_text("");

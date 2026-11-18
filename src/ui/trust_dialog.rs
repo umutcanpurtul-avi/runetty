@@ -3,44 +3,48 @@
 
 use adw::prelude::*;
 
-use crate::data::hostkey;
+use crate::data::{hostkey, Host};
 
 /// Shows the dialog when the key is unknown and runs `proceed` on approval.
 /// Known or undecidable keys go straight to `proceed`.
-pub fn ensure_trusted<F>(
-    parent: &impl IsA<gtk::Widget>,
-    host: &str,
-    port: u16,
-    proceed: F,
-) where
+/// Hosts reached through a jump host or proxy are left to ssh, which asks
+/// about the key itself once it is actually talking to that machine.
+pub fn ensure_trusted<F>(parent: &impl IsA<gtk::Widget>, host: &Host, proceed: F)
+where
     F: Fn() + 'static,
 {
-    let status = hostkey::status(host, port);
+    let Some(target) = hostkey::Target::resolve(host) else {
+        proceed();
+        return;
+    };
+
+    let status = hostkey::status(&target);
     if matches!(status, hostkey::Known::Yes | hostkey::Known::Unclear) {
         proceed();
         return;
     }
 
-    let keys = match hostkey::scan(host, port) {
+    let keys = match hostkey::scan(&target) {
         Ok(keys) => keys,
         Err(reason) => {
             // No key available: leave it to ssh, whose error will show up there.
-            eprintln!("runetty: could not fetch key for {host}: {reason}");
+            eprintln!("runetty: could not fetch key for {}: {reason}", target.host);
             proceed();
             return;
         }
     };
 
     if status == hostkey::Known::Changed {
-        present_changed(parent, host, port, keys, proceed);
+        present_changed(parent, target, keys, proceed);
         return;
     }
 
     let dialog = adw::AlertDialog::new(
         Some("Unknown host"),
         Some(&format!(
-            "This is the first connection to {host}. Compare the fingerprint \
-             with the value you expect before trusting it."
+            "This is the first connection to {}. Compare the fingerprint \
+             with the value you expect before trusting it.",
+            target.host
         )),
     );
 
@@ -56,7 +60,7 @@ pub fn ensure_trusted<F>(
             return;
         }
 
-        if let Err(error) = hostkey::trust(&keys) {
+        if let Err(error) = hostkey::trust(&target, &keys) {
             eprintln!("runetty: could not store key: {error}");
             return;
         }
@@ -72,8 +76,7 @@ pub fn ensure_trusted<F>(
 /// plainly, shows both fingerprints, and defaults to cancelling.
 fn present_changed<F>(
     parent: &impl IsA<gtk::Widget>,
-    host: &str,
-    port: u16,
+    target: hostkey::Target,
     keys: Vec<String>,
     proceed: F,
 ) where
@@ -82,16 +85,17 @@ fn present_changed<F>(
     let dialog = adw::AlertDialog::new(
         Some("Host key has changed"),
         Some(&format!(
-            "The key recorded for {host} no longer matches the one it now \
+            "The key recorded for {} no longer matches the one it now \
              presents.\n\nThis happens when a host is rebuilt or an address is \
              reused — but it is also what a man-in-the-middle attack looks \
-             like. Only continue if you know why it changed."
+             like. Only continue if you know why it changed.",
+            target.host
         )),
     );
 
     let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
 
-    let recorded = hostkey::recorded_fingerprints(host, port);
+    let recorded = hostkey::recorded_fingerprints(&target);
     if !recorded.is_empty() {
         body.append(&fingerprint_group("Recorded until now", &recorded));
     }
@@ -105,19 +109,18 @@ fn present_changed<F>(
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");
 
-    let host = host.to_string();
     dialog.connect_response(None, move |_, response| {
         if response != "replace" {
             return;
         }
 
         // The old entry has to go first, or ssh keeps refusing on the stale one.
-        if let Err(error) = hostkey::forget(&host, port) {
+        if let Err(error) = hostkey::forget(&target) {
             eprintln!("runetty: could not remove the old key: {error}");
             return;
         }
 
-        if let Err(error) = hostkey::trust(&keys) {
+        if let Err(error) = hostkey::trust(&target, &keys) {
             eprintln!("runetty: could not store key: {error}");
             return;
         }
@@ -141,6 +144,7 @@ fn fingerprint_group(title: &str, fingerprints: &[(String, String)]) -> gtk::Wid
 
     for (kind, fingerprint) in fingerprints {
         let row = adw::ActionRow::new();
+        row.set_use_markup(false);
         row.set_title(kind);
         row.set_subtitle(fingerprint);
         row.set_subtitle_selectable(true);
@@ -166,6 +170,7 @@ fn fingerprint_list(keys: &[String]) -> gtk::Widget {
 
     for (kind, fingerprint) in fingerprints {
         let row = adw::ActionRow::new();
+        row.set_use_markup(false);
         row.set_title(&kind);
         row.set_subtitle(&fingerprint);
         row.set_subtitle_selectable(true);

@@ -86,6 +86,19 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.3.2" date="2026-11-18" type="stable" urgency="medium">
+      <description>
+        <p>
+          Hardening from a security review: text a server sends to the password
+          window is shown literally; host keys are checked under the name,
+          port and known_hosts files ssh itself uses, and hosts behind a jump
+          host get ssh's own question; shared connections close when a password
+          is forgotten, a record deleted or runetty quits; Monitor and Agents
+          probes are limited in time and output. An unreadable hosts.toml is
+          now backed up before it can be overwritten.
+        </p>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-11-18" type="stable" urgency="high">
       <description>
         <p>

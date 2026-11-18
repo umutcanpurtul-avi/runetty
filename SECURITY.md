@@ -43,6 +43,10 @@ welcome as issues, but they are not vulnerabilities:
 - **`--filesystem=home` in the Flatpak.** Private keys kept outside `~/.ssh`
   are common, and the key has to stay readable by the `ssh` child process on
   every later connection, which the file chooser portal does not provide.
+- **The Flatpak is not a meaningful sandbox.** Together with `home`, it talks
+  to `org.freedesktop.secrets` and uses the ssh-agent socket. The Secret
+  Service API gives any client access to the whole keyring, not just
+  runetty's entries, so treat the Flatpak as trusted as a native install.
 - **runetty never writes to `~/.ssh/config`.** Deleting such a record only
   hides it, because other tools use that file.
 

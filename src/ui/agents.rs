@@ -9,9 +9,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
-use gtk::{gio, glib};
+use gtk::glib;
 
-use super::rows;
+use super::{probe, rows};
 use crate::data::agents::{self, Agent};
 use crate::data::store::Store;
 
@@ -71,7 +71,7 @@ impl Agents {
             let mut unreachable = 0;
 
             for host in hosts {
-                match run(&agents::probe_args(&host)).await {
+                match probe::run(&agents::probe_args(&host), &[]).await {
                     Ok(output) => found.extend(agents::parse(&output, &host.alias)),
                     Err(_) => unreachable += 1,
                 }
@@ -191,28 +191,6 @@ fn note(text: &str) -> gtk::Label {
     label.set_margin_top(4);
     label.add_css_class("row-meta");
     label
-}
-
-async fn run(command: &[String]) -> Result<String, String> {
-    let args: Vec<&std::ffi::OsStr> =
-        command.iter().map(|part| std::ffi::OsStr::new(part)).collect();
-
-    let process = gio::Subprocess::newv(
-        &args,
-        gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_PIPE,
-    )
-    .map_err(|error| error.message().to_string())?;
-
-    let (stdout, _stderr) = process
-        .communicate_utf8_future(None)
-        .await
-        .map_err(|error| error.message().to_string())?;
-
-    if !process.is_successful() {
-        return Err("unreachable".into());
-    }
-
-    Ok(stdout.map(|text| text.to_string()).unwrap_or_default())
 }
 
 pub fn build(store: Rc<RefCell<Store>>, attach: Rc<dyn Fn(&str)>) -> Rc<Agents> {
