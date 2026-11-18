@@ -52,6 +52,15 @@ jobs:
       - name: Build without terminal
         run: cargo build --release --locked --no-default-features
 
+  # Known vulnerabilities in the dependency tree, from the RustSec database.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
   # Cheap checks that catch packaging mistakes before a Flathub reviewer does.
   metadata:
     runs-on: ubuntu-latest

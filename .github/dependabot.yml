@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Rust dependencies, including the GTK stack, which moves quickly.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  # Pinned action versions go stale quietly.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
