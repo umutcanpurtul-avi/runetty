@@ -6,6 +6,13 @@ monitoring. The technical floor and distribution matrix are in
 
 ## Status
 
+**Early release.** It is used daily by its author and the parts below work,
+but it is young and has not had an independent security review. That matters
+more than usual here: this is an SSH client, so it handles your server
+access, your keys and — if you ask it to — your passwords. Read
+[how records are stored](#how-records-are-stored) before trusting it with
+anything you would not want to re-enter.
+
 Phase 1 — visual skeleton, plus a working data and monitoring layer.
 
 - [x] Design system in a single file (`data/resources/style.css`); no colours in Rust
@@ -44,6 +51,11 @@ Flatpak; see [BUILDING.md](BUILDING.md) for the details.
 
 Deleting a record that came from `~/.ssh/config` only hides it from the list,
 and the hide can be undone. That file belongs to `ssh`, `scp` and `rsync` too.
+
+## Reporting a problem
+
+Open an issue. For anything security-related, mail
+<purtulumut97@gmail.com> rather than filing publicly.
 
 ## License
 
