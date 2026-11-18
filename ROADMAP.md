@@ -8,8 +8,9 @@ about what comes next. Nothing here is a promise or a schedule.
 - **Flathub release.** The main thing standing between runetty and anyone
   trying it: a native build currently needs Rust 1.92, which on most
   distributions means installing rustup first.
-- **Independent security review.** It handles server access, keys and
-  passwords, and has only been read by the people who wrote it.
+- **A formal security audit.** It handles server access, keys and passwords.
+  One external code review has happened and its findings are fixed; an audit
+  is a different thing.
 - **Prebuilt packages** — AUR, `.deb`, `.rpm` — once Flathub is settled.
 
 ## Considered

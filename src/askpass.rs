@@ -20,21 +20,79 @@ fn passphrase_alias(path: &str) -> String {
     format!("key:{path}")
 }
 
-/// What ssh is asking for. Anything unrecognised is refused rather than
-/// guessed at: ssh routes *every* prompt through askpass, including the
-/// host key question, and answering that with a password would hand a secret
-/// to a question that was not about one.
+/// Which connection this askpass was started for, as told by runetty through
+/// the environment. Prompts are judged against it rather than on their
+/// wording alone.
+#[derive(Debug, Default)]
+struct Context {
+    alias: Option<String>,
+    /// Names the target may appear under in a prompt: alias and HostName.
+    hosts: Vec<String>,
+    user: Option<String>,
+    /// Key files that may legitimately ask for a passphrase.
+    keys: Vec<String>,
+}
+
+impl Context {
+    fn from_env() -> Self {
+        let var = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+
+        Self {
+            alias: var("RUNETTY_ASKPASS_ALIAS"),
+            hosts: var("RUNETTY_ASKPASS_HOSTS")
+                .map(|value| value.split(',').map(str::to_string).collect())
+                .unwrap_or_default(),
+            user: var("RUNETTY_ASKPASS_USER"),
+            keys: var("RUNETTY_ASKPASS_KEYS")
+                .map(|value| value.lines().map(str::to_string).collect())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Whether `user@host` names the machine this password was saved for.
+    /// A jump host, or anything else ssh happens to be talking to, does not.
+    fn is_target(&self, who: &str) -> bool {
+        let Some((user, host)) = who.rsplit_once('@') else {
+            return false;
+        };
+
+        let host_matches = self.hosts.iter().any(|name| name.eq_ignore_ascii_case(host));
+        let user_matches = self.user.as_deref().is_none_or(|expected| expected == user);
+
+        host_matches && user_matches
+    }
+}
+
+/// What a prompt is, and therefore what may answer it.
 #[derive(Debug, PartialEq)]
 enum Ask {
-    /// A key passphrase, keyed by the file it unlocks.
+    /// A passphrase for one of the keys this connection uses.
     Passphrase(String),
-    /// A host password, keyed by the alias in the environment.
+    /// The password of the host this connection is for.
     Password,
-    /// Not a secret at all, or not understood.
+    /// Something the user may answer, but the keyring may not: a server's own
+    /// keyboard-interactive text, a jump host's password, a key we did not
+    /// expect. Shown with where it came from, and never stored.
+    Untrusted(String),
+    /// Not a secret at all.
     Refuse,
 }
 
-fn classify(prompt: &str) -> Ask {
+/// OpenSSH prefixes keyboard-interactive prompts with `(user@host) `. What
+/// follows is written by the server, so its wording proves nothing.
+fn server_prompt(prompt: &str) -> Option<(&str, &str)> {
+    let rest = prompt.trim_start().strip_prefix('(')?;
+    let (who, text) = rest.split_once(") ")?;
+    who.contains('@').then_some((who, text))
+}
+
+/// `user@host's password: ` - written by ssh itself, naming the host asking.
+fn password_prompt(prompt: &str) -> Option<&str> {
+    let who = prompt.trim().strip_suffix("'s password:")?;
+    who.contains('@').then_some(who)
+}
+
+fn classify(prompt: &str, context: &Context) -> Ask {
     let lower = prompt.to_lowercase();
 
     // The host key question is a yes/no, never a secret.
@@ -42,17 +100,32 @@ fn classify(prompt: &str) -> Ask {
         return Ask::Refuse;
     }
 
+    // Server-written text first: a server can phrase its prompt to look like
+    // anything, including a local passphrase request naming one of our key
+    // files. Only the plain password of the right host is answered for it.
+    if let Some((who, text)) = server_prompt(prompt) {
+        let text = text.to_lowercase();
+        if context.is_target(who) && text.contains("password") && !text.contains("passphrase") {
+            return Ask::Password;
+        }
+        return Ask::Untrusted(format!("{who} asks"));
+    }
+
     if lower.contains("passphrase") {
         return match quoted_path(prompt) {
-            Some(path) => Ask::Passphrase(path),
-            // A passphrase prompt we cannot attribute to a key must not be
-            // answered with a host password.
-            None => Ask::Refuse,
+            Some(path) if context.keys.iter().any(|key| key == &path) => Ask::Passphrase(path),
+            _ => Ask::Untrusted("ssh asks".into()),
         };
     }
 
-    if lower.contains("password") {
-        return Ask::Password;
+    if let Some(who) = password_prompt(prompt) {
+        // With ProxyJump the same askpass answers the jump host too, and its
+        // prompt also says "password". Only the target gets the target's.
+        return if context.is_target(who) {
+            Ask::Password
+        } else {
+            Ask::Untrusted(format!("{who} asks"))
+        };
     }
 
     Ask::Refuse
@@ -72,12 +145,16 @@ pub fn run() -> glib::ExitCode {
         .find(|argument| !argument.starts_with("--"))
         .unwrap_or_default();
 
-    let alias = match classify(&prompt) {
+    let context = Context::from_env();
+
+    let alias = match classify(&prompt, &context) {
         Ask::Passphrase(path) => passphrase_alias(&path),
-        Ask::Password => match std::env::var("RUNETTY_ASKPASS_ALIAS") {
-            Ok(alias) => alias,
-            Err(_) => return glib::ExitCode::FAILURE,
+        Ask::Password => match &context.alias {
+            Some(alias) => alias.clone(),
+            None => return glib::ExitCode::FAILURE,
         },
+        // Asked of the user, never looked up and never remembered.
+        Ask::Untrusted(source) => return ask(&prompt, None, Some(&source)),
         Ask::Refuse => return glib::ExitCode::FAILURE,
     };
 
@@ -86,12 +163,17 @@ pub fn run() -> glib::ExitCode {
         return glib::ExitCode::SUCCESS;
     }
 
-    ask(&prompt, &alias)
+    ask(&prompt, Some(&alias), None)
 }
 
 /// A minimal password window. Returning failure makes ssh give up, which is
 /// the right outcome when the user cancels.
-fn ask(prompt: &str, alias: &str) -> glib::ExitCode {
+///
+/// `store_as` is the keyring entry an answer may be saved under; `None` for
+/// anything untrusted, where there is no option to save at all. `source`
+/// names who is asking when the text did not come from ssh itself - the user
+/// should know a server wrote it before typing a secret into it.
+fn ask(prompt: &str, store_as: Option<&str>, source: Option<&str>) -> glib::ExitCode {
     if gtk::init().is_err() {
         return glib::ExitCode::FAILURE;
     }
@@ -118,13 +200,31 @@ fn ask(prompt: &str, alias: &str) -> glib::ExitCode {
     remember.set_active(true);
 
     let group = adw::PreferencesGroup::new();
-    group.set_description(Some(if prompt.is_empty() {
-        "ssh is asking for a secret."
-    } else {
-        prompt
-    }));
+
+    match source {
+        // Text from the far side is shown as a quotation from someone else,
+        // not as runetty speaking.
+        Some(source) => {
+            group.set_title(&format!("{source}:"));
+            group.set_description(Some(&format!(
+                "\u{201c}{}\u{201d}\n\nThis text comes from the other end of the \
+                 connection, not from runetty. Only answer if you expected it.",
+                if prompt.is_empty() { "(no text)" } else { prompt.trim() }
+            )));
+        }
+        None => {
+            group.set_description(Some(if prompt.is_empty() {
+                "ssh is asking for a secret."
+            } else {
+                prompt
+            }));
+        }
+    }
+
     group.add(&entry);
-    group.add(&remember);
+    if store_as.is_some() {
+        group.add(&remember);
+    }
 
     let cancel = gtk::Button::with_label("Cancel");
     let unlock = gtk::Button::with_label("Unlock");
@@ -153,7 +253,7 @@ fn ask(prompt: &str, alias: &str) -> glib::ExitCode {
         let entry = entry.clone();
         let remember = remember.clone();
         let window = window.clone();
-        let alias = alias.to_string();
+        let store_as = store_as.map(str::to_string);
 
         move || {
             let secret = entry.text().to_string();
@@ -161,8 +261,8 @@ fn ask(prompt: &str, alias: &str) -> glib::ExitCode {
                 return;
             }
 
-            if remember.is_active() {
-                if let Err(error) = secrets::store(&alias, &secret) {
+            if let Some(alias) = store_as.as_deref().filter(|_| remember.is_active()) {
+                if let Err(error) = secrets::store(alias, &secret) {
                     eprintln!("runetty: could not store secret: {error}");
                 }
             }
@@ -211,39 +311,114 @@ fn ask(prompt: &str, alias: &str) -> glib::ExitCode {
 mod tests {
     use super::*;
 
-    /// A passphrase prompt names the key file; a password prompt does not.
-    #[test]
-    fn passphrase_prompts_are_recognised() {
-        let prompt = "Enter passphrase for key '/home/u/.ssh/id_ed25519': ";
-        assert_eq!(
-            classify(prompt),
-            Ask::Passphrase("/home/u/.ssh/id_ed25519".into())
-        );
-
-        assert_eq!(classify("root@10.0.0.1's password: "), Ask::Password);
+    /// The connection runetty would describe for root@10.0.0.1, saved as "edge".
+    fn edge() -> Context {
+        Context {
+            alias: Some("edge".into()),
+            hosts: vec!["edge".into(), "10.0.0.1".into()],
+            user: Some("root".into()),
+            keys: vec!["/home/u/.ssh/id_ed25519".into()],
+        }
     }
 
-    /// ssh routes the host key question through askpass too. Answering it with
-    /// a password would hand a secret to a question that is not about one.
+    // --- the legitimate paths still work ---
+
+    #[test]
+    fn the_targets_password_is_answered() {
+        assert_eq!(classify("root@10.0.0.1's password: ", &edge()), Ask::Password);
+        assert_eq!(classify("root@edge's password: ", &edge()), Ask::Password);
+    }
+
+    /// PAM-based hosts ask through keyboard-interactive; the target's own
+    /// password prompt there must keep working.
+    #[test]
+    fn the_targets_keyboard_interactive_password_is_answered() {
+        assert_eq!(classify("(root@10.0.0.1) Password: ", &edge()), Ask::Password);
+    }
+
+    #[test]
+    fn an_expected_keys_passphrase_is_answered() {
+        let prompt = "Enter passphrase for key '/home/u/.ssh/id_ed25519': ";
+        assert_eq!(
+            classify(prompt, &edge()),
+            Ask::Passphrase("/home/u/.ssh/id_ed25519".into())
+        );
+    }
+
+    // --- finding 1: a server must not obtain a stored passphrase ---
+
+    /// The reported attack: a server sends text worded exactly like ssh's own
+    /// passphrase prompt, naming a real key file, through keyboard-interactive.
+    #[test]
+    fn a_server_cannot_ask_for_a_passphrase() {
+        let attack = "(root@10.0.0.1) Enter passphrase for key '/home/u/.ssh/id_ed25519':";
+        assert_eq!(classify(attack, &edge()), Ask::Untrusted("root@10.0.0.1 asks".into()));
+    }
+
+    /// Even the target's own server only gets its password through this path,
+    /// and only when the text actually asks for one.
+    #[test]
+    fn server_text_that_is_not_a_password_is_untrusted() {
+        for text in ["(root@10.0.0.1) Verification code: ", "(root@10.0.0.1) OTP: "] {
+            assert!(matches!(classify(text, &edge()), Ask::Untrusted(_)), "{text}");
+        }
+    }
+
+    /// A different machine using keyboard-interactive gets nothing.
+    #[test]
+    fn another_servers_password_prompt_is_untrusted() {
+        assert!(matches!(
+            classify("(root@evil.example) Password: ", &edge()),
+            Ask::Untrusted(_)
+        ));
+    }
+
+    // --- finding 2: a jump host must not receive the target's password ---
+
+    /// With ProxyJump the same askpass answers the bastion as well.
+    #[test]
+    fn a_jump_host_does_not_get_the_targets_password() {
+        assert_eq!(
+            classify("admin@bastion's password: ", &edge()),
+            Ask::Untrusted("admin@bastion asks".into())
+        );
+    }
+
+    #[test]
+    fn the_right_host_with_the_wrong_user_is_not_the_target() {
+        assert!(matches!(
+            classify("deploy@10.0.0.1's password: ", &edge()),
+            Ask::Untrusted(_)
+        ));
+    }
+
+    /// With nothing in the environment nothing is the target.
+    #[test]
+    fn an_empty_context_trusts_nothing() {
+        let empty = Context::default();
+        assert!(matches!(classify("root@10.0.0.1's password: ", &empty), Ask::Untrusted(_)));
+    }
+
+    // --- everything else ---
+
+    #[test]
+    fn an_unexpected_keys_passphrase_is_untrusted() {
+        let prompt = "Enter passphrase for key '/tmp/other_key': ";
+        assert!(matches!(classify(prompt, &edge()), Ask::Untrusted(_)));
+    }
+
     #[test]
     fn the_host_key_question_is_refused() {
         let prompt = "The authenticity of host '10.0.0.1' can't be established.\n\
                       ED25519 key fingerprint is SHA256:abc.\n\
                       Are you sure you want to continue connecting (yes/no/[fingerprint])? ";
-        assert_eq!(classify(prompt), Ask::Refuse);
-    }
-
-    /// A passphrase prompt we cannot attribute to a key file must not fall
-    /// through to the host password.
-    #[test]
-    fn an_unattributable_passphrase_is_refused() {
-        assert_eq!(classify("Bad passphrase, try again: "), Ask::Refuse);
+        assert_eq!(classify(prompt, &edge()), Ask::Refuse);
     }
 
     #[test]
     fn anything_unrecognised_is_refused() {
-        assert_eq!(classify(""), Ask::Refuse);
-        assert_eq!(classify("Verification code: "), Ask::Refuse);
+        assert_eq!(classify("", &edge()), Ask::Refuse);
+        assert_eq!(classify("Something else entirely", &edge()), Ask::Refuse);
     }
 
     /// Passphrases are keyed by file, so one key serves every host using it.

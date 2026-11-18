@@ -103,6 +103,17 @@ impl Store {
             });
         }
 
+        // A record whose host or user starts with `-` is refused here rather
+        // than trusted to the `--` in every invocation. hosts.toml can be
+        // shared or imported, so a crafted one has to be expected.
+        hosts.retain(|host| {
+            let ok = host.is_well_formed();
+            if !ok {
+                eprintln!("runetty: ignoring record {:?}: host or user starts with '-'", host.alias);
+            }
+            ok
+        });
+
         hosts.sort_by(|a, b| a.alias.to_lowercase().cmp(&b.alias.to_lowercase()));
         hosts
     }

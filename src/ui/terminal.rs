@@ -5,9 +5,6 @@ use gtk::prelude::*;
 use gtk::{gdk, gio, glib, pango};
 use vte::prelude::*;
 
-/// Title prefix the wrapper uses to report the exit status.
-const STATUS_PREFIX: &str = "runetty-status:";
-
 const PALETTE: [&str; 16] = [
     "#0d0d12", "#f4766d", "#4ade80", "#e8a33d",
     "#4a7dff", "#b283f0", "#4fd6d2", "#9aa0ab",
@@ -16,21 +13,19 @@ const PALETTE: [&str; 16] = [
 ];
 
 /// With no `command` the user's shell opens.
-/// Given an `alias`, the password is fed from the keyring via SSH_ASKPASS.
+/// `environment` is added to the child's, normally from
+/// `data::askpass_environment` so the keyring can answer ssh's prompts.
 /// `on_status` fires with the exit code when the command ends; the status dot
 /// reads from it.
 pub fn page<F>(
     command: Option<&str>,
-    alias: Option<&str>,
+    environment: &[(String, String)],
     font: &str,
     on_status: F,
 ) -> gtk::Widget
 where
     F: Fn(i32) + 'static,
 {
-    use std::rc::Rc;
-
-    let on_status = Rc::new(on_status);
     let term = vte::Terminal::new();
     term.add_css_class("terminal-page");
     term.set_hexpand(true);
@@ -46,18 +41,20 @@ where
 
     let argv: Vec<String> = match command {
         // Rather than silently dropping the user into a local shell when the
-        // command ends, show the exit code and keep the tab open.
-        // The exit code comes back through the window title: the wrapper
-        // blocks on `read`, so the process never dies and child-exited alone
-        // is not enough.
+        // command ends, say how it ended and exit with the same status.
+        //
+        // The status reaches the dot through child-exited, the wrapper's own
+        // exit. It used to travel through the terminal title, but anything
+        // printed in the session can set the title, so the far side could
+        // turn a red dot green. The tab stays open after the exit, with its
+        // output readable, until it is closed.
         Some(cmd) => vec![
             "/bin/sh".into(),
             "-c".into(),
             format!(
                 "{cmd}; status=$?; \
-                 printf '\\033]0;{STATUS_PREFIX}%s\\007' \"$status\"; \
-                 printf '\\n\\033[2m[runetty] exit code %s — \
-                 press Enter to close\\033[0m\\n' \"$status\"; read _",
+                 printf '\\n\\033[2m[runetty] exit code %s\\033[0m\\n' \"$status\"; \
+                 exit \"$status\"",
                 cmd = cmd
             ),
         ],
@@ -65,19 +62,10 @@ where
     };
     let argv: Vec<&str> = argv.iter().map(String::as_str).collect();
 
-    // When ssh needs a password it runs SSH_ASKPASS and reads its stdout.
-    // We point that at our own binary, which prints what the keyring holds.
-    let env: Vec<String> = match alias {
-        Some(alias) if crate::data::secrets::has(alias) => match std::env::current_exe() {
-            Ok(exe) => vec![
-                format!("SSH_ASKPASS={}", exe.display()),
-                "SSH_ASKPASS_REQUIRE=force".to_string(),
-                format!("RUNETTY_ASKPASS_ALIAS={alias}"),
-            ],
-            Err(_) => Vec::new(),
-        },
-        _ => Vec::new(),
-    };
+    let env: Vec<String> = environment
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
     let env: Vec<&str> = env.iter().map(String::as_str).collect();
 
     let home = glib::home_dir();
@@ -97,17 +85,6 @@ where
             }
         },
     );
-
-    {
-        let on_status = Rc::clone(&on_status);
-        term.connect_window_title_changed(move |term| {
-            let Some(title) = term.window_title() else { return };
-            let Some(rest) = title.strip_prefix(STATUS_PREFIX) else { return };
-            if let Ok(status) = rest.trim().parse::<i32>() {
-                on_status(status);
-            }
-        });
-    }
 
     term.connect_child_exited(move |_, status| on_status(status));
 

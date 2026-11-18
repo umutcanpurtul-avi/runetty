@@ -234,6 +234,15 @@ pub fn present_in_folder<F>(
             return;
         }
 
+        let starts_with_dash = |value: &str| value.trim_start().starts_with('-');
+        if starts_with_dash(&alias)
+            || starts_with_dash(&hostname.text())
+            || starts_with_dash(&user.text())
+        {
+            dialog.set_body("Name, hostname and user cannot start with '-'.");
+            return;
+        }
+
         let host = hostname.text().trim().to_string();
         let input = LocalInput {
             hostname: if host.is_empty() { alias.clone() } else { host },

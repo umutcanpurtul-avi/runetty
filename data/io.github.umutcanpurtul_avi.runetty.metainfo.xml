@@ -86,6 +86,17 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.3.1" date="2026-11-18" type="stable" urgency="high">
+      <description>
+        <p>
+          Security fix: saved passwords and key passphrases are now only
+          offered to the host and the key they belong to. Prompts from anyone
+          else on the connection are shown to you and cannot be saved. Also
+          hardens how hosts, users and tmux session names reach ssh.
+        </p>
+      </description>
+      <url type="details">https://github.com/umutcanpurtul-avi/runetty/security/advisories/GHSA-qc2x-7ph7-p4jg</url>
+    </release>
     <release version="0.3.0" date="2026-11-18">
       <description>
         <p>

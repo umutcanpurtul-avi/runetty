@@ -63,35 +63,72 @@ impl Host {
         }
     }
 
-    /// Every `ssh` argument needed to connect, target included.
+    /// Options for `ssh`, without the program name and without the target.
     ///
-    /// Both terminal sessions and Monitor probes come from here. A single
-    /// source matters: if a field like port or key is missed on one side,
-    /// Monitor connects to the wrong host or with the wrong identity.
-    pub fn ssh_args(&self) -> Vec<String> {
-        let mut args: Vec<String> = vec!["ssh".into()];
-        args.extend(control_options());
+    /// Terminal sessions, Monitor probes and agent attach all start from here.
+    /// A single source matters: if a field like port or key is missed on one
+    /// side, Monitor connects to the wrong host or with the wrong identity.
+    pub fn ssh_options(&self) -> Vec<String> {
+        let mut options = control_options();
 
         if self.source == Source::SshConfig {
             // Port, key, jump host: all already defined in ssh config.
-            args.push(self.alias.clone());
-            return args;
+            return options;
         }
 
         if let Some(port) = self.port {
             if port != 22 {
-                args.push("-p".into());
-                args.push(port.to_string());
+                options.push("-p".into());
+                options.push(port.to_string());
             }
         }
 
         if let Some(identity) = &self.identity_file {
-            args.push("-i".into());
-            args.push(identity.clone());
+            options.push("-i".into());
+            options.push(identity.clone());
         }
 
-        args.push(self.user_host_plain());
+        options
+    }
+
+    /// The destination as ssh should receive it.
+    pub fn ssh_target(&self) -> String {
+        match self.source {
+            Source::SshConfig => self.alias.clone(),
+            Source::Local => self.user_host_plain(),
+        }
+    }
+
+    /// `ssh <options> <extra> -- <target> <remote...>`.
+    ///
+    /// The `--` is what keeps a target such as `-oProxyCommand=...` from being
+    /// read as an option: without it a crafted record in hosts.toml could run
+    /// a command locally. Callers put their own options in `extra`, never after
+    /// the target, and the remote command last.
+    pub fn ssh_invocation(&self, extra: &[&str], remote: &[&str]) -> Vec<String> {
+        let mut args: Vec<String> = vec!["ssh".into()];
+        args.extend(self.ssh_options());
+        args.extend(extra.iter().map(|value| value.to_string()));
+        args.push("--".into());
+        args.push(self.ssh_target());
+        args.extend(remote.iter().map(|value| value.to_string()));
         args
+    }
+
+    /// Every `ssh` argument needed for an interactive session.
+    pub fn ssh_args(&self) -> Vec<String> {
+        self.ssh_invocation(&[], &[])
+    }
+
+    /// Hosts and users may not start with `-`. The `--` in every invocation
+    /// already stops them being read as options; refusing them at the door
+    /// means a crafted record never gets that far.
+    pub fn is_well_formed(&self) -> bool {
+        let starts_with_dash = |value: &str| value.trim_start().starts_with('-');
+
+        !starts_with_dash(&self.alias)
+            && !starts_with_dash(&self.hostname)
+            && !self.user.as_deref().is_some_and(starts_with_dash)
     }
 
     /// Shell command to run in the terminal.
@@ -165,6 +202,63 @@ fn control_options_in(dir: &std::path::Path) -> Vec<String> {
 /// The socket path must stay short; `%C` is already a short hash.
 pub fn control_dir() -> Option<std::path::PathBuf> {
     dirs::runtime_dir().or_else(dirs::cache_dir).map(|dir| dir.join("runetty"))
+}
+
+/// Environment for an ssh process that may be answered from the keyring.
+///
+/// Besides the keyring alias, askpass is told which connection this is: the
+/// names the target may appear under, its user, and the key files that may
+/// legitimately ask for a passphrase. Without that it could only judge a
+/// prompt by its wording, and both the wording and - for keyboard-interactive
+/// prompts - the text itself can come from a server, or from a jump host
+/// that is not the machine the password belongs to.
+///
+/// Empty when nothing is saved for this host: ssh then asks in the terminal.
+pub fn askpass_environment(host: &Host) -> Vec<(String, String)> {
+    if !secrets::has(&host.alias) {
+        return Vec::new();
+    }
+
+    let Ok(exe) = std::env::current_exe() else {
+        return Vec::new();
+    };
+
+    let mut names = vec![host.alias.clone()];
+    if !host.hostname.is_empty() && host.hostname != host.alias {
+        names.push(host.hostname.clone());
+    }
+
+    let mut environment = vec![
+        ("SSH_ASKPASS".to_string(), exe.to_string_lossy().into_owned()),
+        ("SSH_ASKPASS_REQUIRE".to_string(), "force".to_string()),
+        ("RUNETTY_ASKPASS_ALIAS".to_string(), host.alias.clone()),
+        ("RUNETTY_ASKPASS_HOSTS".to_string(), names.join(",")),
+        ("RUNETTY_ASKPASS_KEYS".to_string(), expected_keys(host).join("\n")),
+    ];
+
+    if let Some(user) = &host.user {
+        environment.push(("RUNETTY_ASKPASS_USER".to_string(), user.clone()));
+    }
+
+    environment
+}
+
+/// The key files ssh may legitimately ask a passphrase for on this connection:
+/// the one the record names, plus ssh's own defaults.
+fn expected_keys(host: &Host) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+
+    if let Some(identity) = &host.identity_file {
+        keys.push(identity.clone());
+    }
+
+    if let Some(ssh) = dirs::home_dir().map(|home| home.join(".ssh")) {
+        for name in ["id_ed25519", "id_ecdsa", "id_rsa", "id_ed25519_sk", "id_ecdsa_sk"] {
+            keys.push(ssh.join(name).to_string_lossy().into_owned());
+        }
+    }
+
+    keys
 }
 
 /// Writes a file only the owner can read.
@@ -307,6 +401,29 @@ mod injection_tests {
     fn exec_arguments_are_not_quoted() {
         let args = host("box; rm -rf ~", Some("root"), None).ssh_args();
         assert_eq!(args.last().map(String::as_str), Some("root@box; rm -rf ~"));
+    }
+
+    /// A target that looks like an option must be read as a target. Without
+    /// `--`, `-oProxyCommand=...` in hosts.toml would run a command locally.
+    #[test]
+    fn a_dash_target_comes_after_the_option_terminator() {
+        let evil = host("-oProxyCommand=touch /tmp/pwned", None, None);
+        let args = evil.ssh_invocation(&["-t"], &["uptime"]);
+
+        let dashes = args.iter().position(|arg| arg == "--").expect("-- present");
+        assert_eq!(args[dashes + 1], "-oProxyCommand=touch /tmp/pwned");
+        assert!(
+            args[..dashes].iter().all(|arg| !arg.contains("ProxyCommand")),
+            "the target leaked into the options: {args:?}"
+        );
+        assert_eq!(args.last().map(String::as_str), Some("uptime"));
+    }
+
+    #[test]
+    fn dash_hosts_and_users_are_rejected() {
+        assert!(host("example.test", Some("root"), None).is_well_formed());
+        assert!(!host("-oProxyCommand=x", None, None).is_well_formed());
+        assert!(!host("example.test", Some("-oProxyCommand=x"), None).is_well_formed());
     }
 }
 

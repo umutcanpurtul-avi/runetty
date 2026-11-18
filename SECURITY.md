@@ -46,7 +46,13 @@ welcome as issues, but they are not vulnerabilities:
 - **runetty never writes to `~/.ssh/config`.** Deleting such a record only
   hides it, because other tools use that file.
 
-## Not yet reviewed
+## Advisories
 
-No independent security review has happened. The credential paths have been
-read critically only by the people who wrote them.
+Published advisories are listed under
+[Security → Advisories](https://github.com/umutcanpurtul-avi/runetty/security/advisories).
+
+## Review
+
+The credential paths have had one external code review, which found that
+saved secrets could reach the wrong party; that is fixed in 0.3.1. No formal
+audit has happened.

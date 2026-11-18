@@ -55,6 +55,7 @@ pub fn build(
         content_stack.clone(),
         Rc::clone(&live),
         Rc::clone(&settings),
+        Rc::clone(&store),
     );
 
     // A raw command, typed in the empty state's field and tied to no record.
@@ -481,6 +482,8 @@ struct Tabs {
     monitor_page: RefCell<Option<adw::TabPage>>,
     live: Rc<Sessions>,
     settings: Rc<RefCell<Settings>>,
+    /// To tell askpass which host a new tab connects to.
+    store: Rc<RefCell<Store>>,
 }
 
 impl Tabs {
@@ -489,6 +492,7 @@ impl Tabs {
         stack: gtk::Stack,
         live: Rc<Sessions>,
         settings: Rc<RefCell<Settings>>,
+        store: Rc<RefCell<Store>>,
     ) -> Rc<Self> {
         Rc::new(Self {
             view,
@@ -497,6 +501,7 @@ impl Tabs {
             monitor_page: RefCell::new(None),
             live,
             settings,
+            store,
         })
     }
 
@@ -693,7 +698,16 @@ impl Tabs {
 
         let font = self.settings.borrow().appearance.terminal_pango();
 
-        crate::ui::terminal::page(Some(command), alias, &font, move |status| {
+        // A raw command typed in the empty state has no record, so nothing
+        // from the keyring can answer it.
+        let environment = alias
+            .and_then(|alias| {
+                self.store.borrow().hosts().into_iter().find(|host| host.alias == alias)
+            })
+            .map(|host| crate::data::askpass_environment(&host))
+            .unwrap_or_default();
+
+        crate::ui::terminal::page(Some(command), &environment, &font, move |status| {
             if let Some(alias) = &owned {
                 // The tab is still open but the command ended: connection dropped.
                 this.mark(

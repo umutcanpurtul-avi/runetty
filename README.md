@@ -163,7 +163,7 @@ runetty handles your server access, so here is exactly what it does with it.
 | --- | --- |
 | **Passwords** | Stored in the system keyring (Secret Service — GNOME Keyring or KWallet). Never written to any file. |
 | **Passing secrets to ssh** | Through `SSH_ASKPASS`, so a password never appears on a command line or in `ps`. No `sshpass`. |
-| **Key passphrases** | Recognised by prompt text and asked for in a small dialog; never answered with a host password. |
+| **Which prompt gets which secret** | askpass is told which host a connection is for. A saved password answers only that host's own prompt - never a jump host's, never another server's. A saved passphrase answers only ssh's own request for a key this connection uses - never text a server sent. Anything else is shown to you, marked with who is asking, and cannot be saved. |
 | **Host keys** | Fetched with `ssh-keyscan`, fingerprint shown, saved to `known_hosts` **only after you approve**. Never auto-accepted. |
 | **`~/.ssh/config`** | Read-only. Deleting a record from it only hides it in runetty (and can be undone), because `ssh`, `scp` and `rsync` use that file too. |
 | **Remote footprint** | None. Monitor reads `/proc` and `df`; Agents runs `tmux list-sessions`. No daemon, no agent, no install. |

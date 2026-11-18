@@ -232,23 +232,20 @@ fn parse_cpu(line: &str) -> Option<CpuTimes> {
 /// from the keyring via SSH_ASKPASS - `BatchMode` is deliberately off, since
 /// with it even a saved password could not be used.
 pub fn probe_args(host: &super::Host) -> Vec<String> {
-    let mut args = host.ssh_args();
-    let target = args.pop().unwrap_or_default();
-
-    // We do not want to silently accept an unknown host in the background;
-    // that decision is made in our own dialog.
-    args.push("-o".into());
-    args.push("StrictHostKeyChecking=yes".into());
-    args.push("-o".into());
-    args.push("ConnectTimeout=5".into());
-    args.push("-o".into());
-    args.push("NumberOfPasswordPrompts=1".into());
-
-    args.push(target);
-    args.push(PROBE.into());
-
-    args
+    host.ssh_invocation(BACKGROUND_OPTIONS, &[PROBE])
 }
+
+/// Options for probes that run without anyone watching. An unknown host is
+/// never accepted silently - trust is decided in our own dialog - and a single
+/// password attempt keeps a wrong answer from locking an account.
+const BACKGROUND_OPTIONS: &[&str] = &[
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "-o",
+    "ConnectTimeout=5",
+    "-o",
+    "NumberOfPasswordPrompts=1",
+];
 
 #[cfg(test)]
 mod tests {
@@ -595,10 +592,7 @@ pub fn human_kb(kilobytes: u64) -> String {
 }
 
 pub fn detail_args(host: &super::Host) -> Vec<String> {
-    let mut args = probe_args(host);
-    args.pop();
-    args.push(DETAIL_PROBE.into());
-    args
+    host.ssh_invocation(BACKGROUND_OPTIONS, &[DETAIL_PROBE])
 }
 
 #[cfg(test)]

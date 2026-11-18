@@ -31,7 +31,8 @@ struct Card {
     /// derived. Counters alone only say "how much since boot".
     traffic: RefCell<Option<(Vec<metrics::Interface>, Instant)>>,
     network: gtk::Label,
-    alias: String,
+    /// Tells askpass which connection this is; see `data::askpass_environment`.
+    environment: Vec<(String, String)>,
     command: Vec<String>,
     rings: [Ring; 3],
     readings: [gtk::Label; 3],
@@ -200,7 +201,7 @@ impl Monitor {
             };
 
             glib::spawn_future_local(async move {
-                let result = run(&command, &card.alias).await;
+                let result = run(&command, &card.environment).await;
                 card.busy.set(false);
 
                 let output = match result {
@@ -325,7 +326,7 @@ impl Card {
     }
 }
 
-async fn run(command: &[String], alias: &str) -> Result<String, String> {
+async fn run(command: &[String], environment: &[(String, String)]) -> Result<String, String> {
     let args: Vec<&std::ffi::OsStr> =
         command.iter().map(|part| std::ffi::OsStr::new(part)).collect();
 
@@ -333,22 +334,10 @@ async fn run(command: &[String], alias: &str) -> Result<String, String> {
         gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_PIPE,
     );
 
-    // With no channel open yet, take the password from the keyring; as in the
-    // terminal it never appears on the command line.
-    if crate::data::secrets::has(alias) {
-        if let Ok(exe) = std::env::current_exe() {
-            launcher.setenv("SSH_ASKPASS", exe.as_os_str(), true);
-            launcher.setenv(
-                std::ffi::OsStr::new("SSH_ASKPASS_REQUIRE"),
-                std::ffi::OsStr::new("force"),
-                true,
-            );
-            launcher.setenv(
-                std::ffi::OsStr::new("RUNETTY_ASKPASS_ALIAS"),
-                std::ffi::OsStr::new(alias),
-                true,
-            );
-        }
+    // With no channel open yet, the keyring may answer - but only for this
+    // host, which is what the environment tells askpass.
+    for (key, value) in environment {
+        launcher.setenv(std::ffi::OsStr::new(key), std::ffi::OsStr::new(value), true);
     }
 
     let process = launcher
@@ -471,7 +460,7 @@ fn build_card(host: &Host, stacked: Rc<Cell<bool>>) -> Card {
         traffic: RefCell::new(None),
         network: network.clone(),
         stacked,
-        alias: host.alias.clone(),
+        environment: crate::data::askpass_environment(host),
         command: metrics::probe_args(host),
         rings,
         readings,
@@ -484,7 +473,7 @@ fn build_card(host: &Host, stacked: Rc<Cell<bool>>) -> Card {
     };
 
     let command = card.command.clone();
-    let alias = card.alias.clone();
+    let environment = card.environment.clone();
     let error_box = card.error.clone();
     let error_label = card.error_text.clone();
     retry.connect_clicked(move |button| {
@@ -492,11 +481,11 @@ fn build_card(host: &Host, stacked: Rc<Cell<bool>>) -> Card {
         error_label.set_text("[!] connecting...");
 
         let command = command.clone();
-        let alias = alias.clone();
+        let environment = environment.clone();
         let button = button.clone();
         let error_box = error_box.clone();
         glib::spawn_future_local(async move {
-            let result = run(&command, &alias).await;
+            let result = run(&command, &environment).await;
             button.set_sensitive(true);
             if result.is_ok() {
                 error_box.set_visible(false);
@@ -541,7 +530,7 @@ fn refresh_detail(card: &Rc<Card>) {
     let card = Rc::clone(card);
     let command = card.detail_command.clone();
     glib::spawn_future_local(async move {
-        let result = run(&command, &card.alias).await;
+        let result = run(&command, &card.environment).await;
         card.busy.set(false);
 
         match result.ok().and_then(|output| metrics::parse_detail(&output)) {

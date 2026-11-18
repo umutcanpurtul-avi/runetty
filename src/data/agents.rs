@@ -78,22 +78,23 @@ impl Agent {
     }
 
     /// Command that attaches to this session in a terminal tab.
+    ///
+    /// The name crosses two shells. ssh joins its remote arguments into one
+    /// string that the remote shell parses again, so the name is quoted for
+    /// the remote side first; the whole command is then quoted once more for
+    /// the local `/bin/sh` the terminal runs. Quoting only for the local side
+    /// broke names with spaces and let `;` or `$(...)` run on the remote host.
     pub fn attach_command(&self, host: &Host) -> String {
-        let mut args = host.ssh_args();
-        let target = args.pop().unwrap_or_default();
+        let remote = format!("tmux attach -t {}", shell_single_quote(&self.name));
 
         // A tty is required: tmux refuses to attach without one.
-        args.push("-t".into());
-        args.push(target);
-
-        let command = args
+        host.ssh_invocation(&["-t"], &[&remote])
             .iter()
             .map(|arg| super::quote_if_needed(arg))
             .collect::<Vec<String>>()
-            .join(" ");
-
-        format!("{command} tmux attach -t {}", shell_single_quote(&self.name))
+            .join(" ")
     }
+
 }
 
 fn shell_single_quote(value: &str) -> String {
@@ -140,19 +141,17 @@ fn parse_line(line: &str, host: &str) -> Option<Agent> {
 
 /// `ssh` arguments that list sessions over the shared channel.
 pub fn probe_args(host: &Host) -> Vec<String> {
-    let mut args = host.ssh_args();
-    let target = args.pop().unwrap_or_default();
-
-    args.push("-o".into());
-    args.push("StrictHostKeyChecking=yes".into());
-    args.push("-o".into());
-    args.push("ConnectTimeout=5".into());
-    args.push("-o".into());
-    args.push("NumberOfPasswordPrompts=1".into());
-
-    args.push(target);
-    args.push(PROBE.into());
-    args
+    host.ssh_invocation(
+        &[
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "ConnectTimeout=5",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+        ],
+        &[PROBE],
+    )
 }
 
 #[cfg(test)]
@@ -215,10 +214,8 @@ my|session|0|2|1700000480|
         assert_eq!(agents[0].state(1_700_999_999), State::Blocked);
     }
 
-    /// The attach command needs a tty and must quote the session name.
-    #[test]
-    fn attach_command_requests_a_tty() {
-        let host = Host {
+    fn local_host() -> Host {
+        Host {
             alias: "edge".into(),
             hostname: "10.0.0.1".into(),
             user: Some("root".into()),
@@ -228,19 +225,64 @@ my|session|0|2|1700000480|
             last_used: None,
             monitored: true,
             source: super::super::Source::Local,
-        };
+        }
+    }
 
-        let agent = Agent {
-            name: "my build".into(),
+    fn agent(name: &str) -> Agent {
+        Agent {
+            name: name.into(),
             host: "edge".into(),
             attached: false,
             windows: 1,
             activity: 0,
             alerts: String::new(),
-        };
-
-        let command = agent.attach_command(&host);
-        assert!(command.contains(" -t root@10.0.0.1 "), "got {command}");
-        assert!(command.ends_with("tmux attach -t 'my build'"), "got {command}");
+        }
     }
+
+    fn sh(script: &str) -> String {
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(script)
+            .output()
+            .expect("sh should run");
+        assert!(output.status.success(), "sh rejected: {script}");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    /// Follows the name through both shells it crosses. The local shell hands
+    /// ssh its argv; ssh joins the remote part into a string the remote shell
+    /// parses again. Both are run for real, with `ssh` and `tmux` swapped for
+    /// `printf`, so what tmux would have received is exactly what is printed.
+    fn tmux_argv(name: &str) -> Vec<String> {
+        let command = agent(name).attach_command(&local_host());
+
+        let local = sh(&command.replacen("ssh", "printf '%s\\n'", 1));
+        let ssh_argv: Vec<&str> = local.lines().collect();
+
+        let dashes = ssh_argv.iter().position(|arg| *arg == "--").expect("-- present");
+        assert!(ssh_argv[..dashes].contains(&"-t"), "tty option before --: {ssh_argv:?}");
+        assert_eq!(ssh_argv[dashes + 1], "root@10.0.0.1");
+
+        // Everything after the target is what ssh hands the remote shell.
+        let remote = ssh_argv[dashes + 2..].join(" ");
+        sh(&remote.replacen("tmux", "printf '%s\\n'", 1))
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn a_name_with_spaces_reaches_tmux_whole() {
+        assert_eq!(tmux_argv("my build"), ["attach", "-t", "my build"]);
+    }
+
+    /// The name comes from the remote tmux server; it must not run as code
+    /// when it reaches the remote shell a second time.
+    #[test]
+    fn a_hostile_name_stays_one_argument() {
+        for name in ["a; id", "$(id)", "`id`", "it's", "a | b"] {
+            assert_eq!(tmux_argv(name), ["attach", "-t", name], "name {name:?}");
+        }
+    }
+
 }
