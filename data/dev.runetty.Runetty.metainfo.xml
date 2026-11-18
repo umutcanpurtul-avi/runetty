@@ -3,23 +3,109 @@
   <id>dev.runetty.Runetty</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
+
   <name>runetty</name>
-  <summary>SSH session manager and terminal</summary>
+  <summary>Manage SSH sessions, long-running jobs and server health</summary>
+
+  <developer id="dev.runetty">
+    <name>Umutcan Purtul</name>
+  </developer>
+
   <description>
     <p>
-      A terminal client that gathers SSH sessions, running agents and host
-      metrics into a single window.
+      runetty puts three things most people juggle across terminal tabs into a
+      single native window: SSH sessions, the long-running jobs on each server,
+      and how those servers are doing.
     </p>
+    <p>
+      It builds on the SSH setup you already have. Hosts come straight from
+      ~/.ssh/config, which runetty only ever reads. Nothing is installed on the
+      far side: monitoring reads /proc, and jobs are plain tmux sessions. If a
+      server accepts ssh, it works.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Tabbed terminals, with the shell keybindings left alone</li>
+      <li>Sidebar with folders, drag and drop, filtering and recent hosts</li>
+      <li>Host key fingerprints shown for approval, never auto-accepted</li>
+      <li>Passwords kept in the system keyring, never in a file</li>
+      <li>Per-host monitoring: CPU, memory, disks, network and top processes</li>
+      <li>Long-running tmux sessions listed as agents, with one click to attach</li>
+      <li>Command palette, full keyboard shortcut reference, light and dark themes</li>
+    </ul>
   </description>
+
   <launchable type="desktop-id">dev.runetty.Runetty.desktop</launchable>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Terminal sessions with the server sidebar</caption>
+      <image>https://raw.githubusercontent.com/umutcanpurtul-avi/runetty/main/docs/screenshots/sessions.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Host monitoring with per-card detail</caption>
+      <image>https://raw.githubusercontent.com/umutcanpurtul-avi/runetty/main/docs/screenshots/monitor.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Long-running tmux sessions listed as agents</caption>
+      <image>https://raw.githubusercontent.com/umutcanpurtul-avi/runetty/main/docs/screenshots/agents.png</image>
+    </screenshot>
+  </screenshots>
+
+  <url type="homepage">https://github.com/umutcanpurtul-avi/runetty</url>
+  <url type="bugtracker">https://github.com/umutcanpurtul-avi/runetty/issues</url>
+  <url type="vcs-browser">https://github.com/umutcanpurtul-avi/runetty</url>
+
   <categories>
     <category>System</category>
     <category>TerminalEmulator</category>
   </categories>
+
+  <keywords>
+    <keyword>ssh</keyword>
+    <keyword>terminal</keyword>
+    <keyword>server</keyword>
+    <keyword>remote</keyword>
+    <keyword>monitoring</keyword>
+  </keywords>
+
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+
+  <requires>
+    <display_length compare="ge">768</display_length>
+  </requires>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#f6c6b8</color>
+    <color type="primary" scheme_preference="dark">#2a1410</color>
+  </branding>
+
   <content_rating type="oars-1.1"/>
+
   <releases>
-    <release version="0.1.0" date="2026-10-28">
-      <description><p>First visual skeleton.</p></description>
+    <release version="0.2.0" date="2026-11-18">
+      <description>
+        <p>
+          Adds a command palette over servers and commands, and tightens the
+          handling of secrets: unrecognised ssh prompts are refused rather than
+          answered with a password, ~/.ssh is created privately, and the record
+          files are no longer world-readable.
+        </p>
+      </description>
+      <url type="details">https://github.com/umutcanpurtul-avi/runetty/releases/tag/v0.2.0</url>
+    </release>
+    <release version="0.1.0" date="2026-11-18">
+      <description>
+        <p>
+          First release. SSH sessions with tabs, records from ~/.ssh/config and
+          the app's own store, host key approval, passwords in the system
+          keyring, live host monitoring, and tmux sessions as agents.
+        </p>
+      </description>
+      <url type="details">https://github.com/umutcanpurtul-avi/runetty/releases/tag/v0.1.0</url>
     </release>
   </releases>
 </component>
