@@ -291,7 +291,7 @@ impl Store {
 
         if let Some(parent) = path.parent() {
             if let Err(error) = std::fs::create_dir_all(parent) {
-                eprintln!("runetty: {} olusturulamadi: {error}", parent.display());
+                eprintln!("runetty: could not create {}: {error}", parent.display());
                 return;
             }
         }
@@ -300,8 +300,8 @@ impl Store {
             Ok(text) => {
                 // If the write is cut short, the old file must stay intact.
                 let temporary = path.with_extension("toml.tmp");
-                if let Err(error) =
-                    std::fs::write(&temporary, text).and_then(|()| std::fs::rename(&temporary, path))
+                if let Err(error) = super::write_private(&temporary, &text)
+                    .and_then(|()| std::fs::rename(&temporary, path))
                 {
                     eprintln!("runetty: could not write hosts.toml: {error}");
                 }

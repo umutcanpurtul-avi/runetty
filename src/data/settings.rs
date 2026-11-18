@@ -145,7 +145,7 @@ impl Settings {
         match toml::to_string_pretty(self) {
             Ok(text) => {
                 let temporary = path.with_extension("toml.tmp");
-                if let Err(error) = std::fs::write(&temporary, text)
+                if let Err(error) = super::write_private(&temporary, &text)
                     .and_then(|()| std::fs::rename(&temporary, &path))
                 {
                     eprintln!("runetty: could not write settings.toml: {error}");

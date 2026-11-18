@@ -167,6 +167,25 @@ pub fn control_dir() -> Option<std::path::PathBuf> {
     dirs::runtime_dir().or_else(dirs::cache_dir).map(|dir| dir.join("runetty"))
 }
 
+/// Writes a file only the owner can read.
+///
+/// These files list which machines exist, who logs in to them and on which
+/// port. That is an inventory worth keeping to oneself on a shared machine,
+/// and it costs nothing to match what ssh does with its own config.
+pub(crate) fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+
+    file.write_all(contents.as_bytes())
+}
+
 pub fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -208,5 +227,112 @@ mod control_tests {
     fn overlong_path_disables_sharing_instead_of_failing() {
         let deep = format!("/tmp/{}/runetty", "x".repeat(120));
         assert!(control_options_in(Path::new(&deep)).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod injection_tests {
+    use super::*;
+
+    fn host(hostname: &str, user: Option<&str>, identity: Option<&str>) -> Host {
+        Host {
+            alias: "evil".into(),
+            hostname: hostname.into(),
+            user: user.map(str::to_string),
+            port: None,
+            folder: None,
+            identity_file: identity.map(str::to_string),
+            last_used: None,
+            monitored: false,
+            source: Source::Local,
+        }
+    }
+
+    /// Record fields reach a shell through the terminal, so a hostname that
+    /// looks like shell syntax must stay one argument.
+    #[test]
+    fn metacharacters_in_a_hostname_stay_quoted() {
+        let command = host("box; rm -rf ~", None, None).command();
+        assert!(command.ends_with("'box; rm -rf ~'"), "got {command}");
+    }
+
+    #[test]
+    fn substitution_in_a_hostname_stays_quoted() {
+        for nasty in ["$(id)", "`id`", "a|b", "a&b", "x\nrm -rf /"] {
+            let command = host(nasty, None, None).command();
+            let quoted = shell_quote(nasty);
+            assert!(command.ends_with(&quoted), "{nasty:?} -> {command}");
+        }
+    }
+
+
+    /// Reading the quoting by eye proves little, so ask a real shell: the
+    /// value must come back out byte for byte, and nothing inside it may run.
+    fn round_trip(value: &str) -> String {
+        let script = format!("printf %s {}", shell_quote(value));
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(&script)
+            .output()
+            .expect("sh should run");
+
+        assert!(output.status.success(), "sh rejected: {script}");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[test]
+    fn quoting_survives_a_real_shell() {
+        for nasty in [
+            "a'; id; echo '",
+            "$(id)",
+            "`id`",
+            "; rm -rf ~",
+            "a|b",
+            "x\ny",
+            "--option=value",
+        ] {
+            assert_eq!(round_trip(nasty), nasty, "mangled: {nasty:?}");
+        }
+    }
+
+    #[test]
+    fn key_paths_with_spaces_stay_one_argument() {
+        let command = host("example.test", Some("root"), Some("/home/u/my keys/id")).command();
+        assert!(command.contains("-i '/home/u/my keys/id'"), "got {command}");
+    }
+
+    /// ssh_args goes to execv, where no shell is involved: values must be
+    /// passed through untouched rather than carrying quotes into argv.
+    #[test]
+    fn exec_arguments_are_not_quoted() {
+        let args = host("box; rm -rf ~", Some("root"), None).ssh_args();
+        assert_eq!(args.last().map(String::as_str), Some("root@box; rm -rf ~"));
+    }
+}
+
+#[cfg(test)]
+mod permission_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// The record files list which machines exist and who logs in to them.
+    /// On a shared machine that should not be world-readable.
+    #[test]
+    fn records_are_written_owner_only() {
+        let dir = std::env::temp_dir().join(format!("runetty-perm-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("hosts.toml");
+
+        write_private(&path, "hidden = []\n").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "got {mode:o}");
+
+        // Rewriting must not loosen it either.
+        write_private(&path, "hidden = [\"x\"]\n").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "got {mode:o} after rewrite");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

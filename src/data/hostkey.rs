@@ -212,12 +212,27 @@ pub fn trust(keys: &[String]) -> Result<(), String> {
     trust_into(&path, keys)
 }
 
+/// ssh refuses to use a ~/.ssh that others can write to, and the directory is
+/// private by convention. Creating it at the default umask would be wrong.
+fn create_private_dir(path: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    if path.is_dir() {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(path)
+        .map_err(|error| format!("could not create {}: {error}", path.display()))?;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("could not set permissions on {}: {error}", path.display()))
+}
+
 fn trust_into(path: &std::path::Path, keys: &[String]) -> Result<(), String> {
     use std::io::Write;
 
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+        create_private_dir(parent)?;
     }
 
     let mut file = std::fs::OpenOptions::new()

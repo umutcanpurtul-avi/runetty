@@ -20,12 +20,46 @@ fn passphrase_alias(path: &str) -> String {
     format!("key:{path}")
 }
 
-/// `Enter passphrase for key '/home/u/.ssh/id_ed25519':` -> the path.
-fn passphrase_target(prompt: &str) -> Option<String> {
-    if !prompt.to_lowercase().contains("passphrase") {
-        return None;
+/// What ssh is asking for. Anything unrecognised is refused rather than
+/// guessed at: ssh routes *every* prompt through askpass, including the
+/// host key question, and answering that with a password would hand a secret
+/// to a question that was not about one.
+#[derive(Debug, PartialEq)]
+enum Ask {
+    /// A key passphrase, keyed by the file it unlocks.
+    Passphrase(String),
+    /// A host password, keyed by the alias in the environment.
+    Password,
+    /// Not a secret at all, or not understood.
+    Refuse,
+}
+
+fn classify(prompt: &str) -> Ask {
+    let lower = prompt.to_lowercase();
+
+    // The host key question is a yes/no, never a secret.
+    if lower.contains("yes/no") || lower.contains("fingerprint") {
+        return Ask::Refuse;
     }
 
+    if lower.contains("passphrase") {
+        return match quoted_path(prompt) {
+            Some(path) => Ask::Passphrase(path),
+            // A passphrase prompt we cannot attribute to a key must not be
+            // answered with a host password.
+            None => Ask::Refuse,
+        };
+    }
+
+    if lower.contains("password") {
+        return Ask::Password;
+    }
+
+    Ask::Refuse
+}
+
+/// `Enter passphrase for key '/home/u/.ssh/id_ed25519':` -> the path.
+fn quoted_path(prompt: &str) -> Option<String> {
     let start = prompt.find('\'')?;
     let rest = &prompt[start + 1..];
     let end = rest.find('\'')?;
@@ -38,14 +72,13 @@ pub fn run() -> glib::ExitCode {
         .find(|argument| !argument.starts_with("--"))
         .unwrap_or_default();
 
-    let alias = match passphrase_target(&prompt) {
-        Some(path) => passphrase_alias(&path),
-        None => match std::env::var("RUNETTY_ASKPASS_ALIAS") {
+    let alias = match classify(&prompt) {
+        Ask::Passphrase(path) => passphrase_alias(&path),
+        Ask::Password => match std::env::var("RUNETTY_ASKPASS_ALIAS") {
             Ok(alias) => alias,
-            // No idea what is being asked and nothing to look up: let ssh fall
-            // back to its own prompt rather than answering wrongly.
             Err(_) => return glib::ExitCode::FAILURE,
         },
+        Ask::Refuse => return glib::ExitCode::FAILURE,
     };
 
     if let Some(secret) = secrets::lookup(&alias) {
@@ -182,10 +215,35 @@ mod tests {
     #[test]
     fn passphrase_prompts_are_recognised() {
         let prompt = "Enter passphrase for key '/home/u/.ssh/id_ed25519': ";
-        assert_eq!(passphrase_target(prompt).as_deref(), Some("/home/u/.ssh/id_ed25519"));
+        assert_eq!(
+            classify(prompt),
+            Ask::Passphrase("/home/u/.ssh/id_ed25519".into())
+        );
 
-        assert_eq!(passphrase_target("root@10.0.0.1's password: "), None);
-        assert_eq!(passphrase_target(""), None);
+        assert_eq!(classify("root@10.0.0.1's password: "), Ask::Password);
+    }
+
+    /// ssh routes the host key question through askpass too. Answering it with
+    /// a password would hand a secret to a question that is not about one.
+    #[test]
+    fn the_host_key_question_is_refused() {
+        let prompt = "The authenticity of host '10.0.0.1' can't be established.\n\
+                      ED25519 key fingerprint is SHA256:abc.\n\
+                      Are you sure you want to continue connecting (yes/no/[fingerprint])? ";
+        assert_eq!(classify(prompt), Ask::Refuse);
+    }
+
+    /// A passphrase prompt we cannot attribute to a key file must not fall
+    /// through to the host password.
+    #[test]
+    fn an_unattributable_passphrase_is_refused() {
+        assert_eq!(classify("Bad passphrase, try again: "), Ask::Refuse);
+    }
+
+    #[test]
+    fn anything_unrecognised_is_refused() {
+        assert_eq!(classify(""), Ask::Refuse);
+        assert_eq!(classify("Verification code: "), Ask::Refuse);
     }
 
     /// Passphrases are keyed by file, so one key serves every host using it.

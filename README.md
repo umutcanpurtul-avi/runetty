@@ -168,6 +168,8 @@ runetty handles your server access, so here is exactly what it does with it.
 | **`~/.ssh/config`** | Read-only. Deleting a record from it only hides it in runetty (and can be undone), because `ssh`, `scp` and `rsync` use that file too. |
 | **Remote footprint** | None. Monitor reads `/proc` and `df`; Agents runs `tmux list-sessions`. No daemon, no agent, no install. |
 | **Network** | Only the SSH connections you open or the hosts you explicitly watch. No telemetry. |
+| **Record files** | Written `0600`; `~/.ssh` is created `0700` if it does not exist. |
+| **Shell safety** | Record fields reach a shell through the terminal, so they are quoted and the quoting is tested against a real shell. |
 
 If the keyring is not available, the password simply is not saved — runetty
 says so and ssh asks in the terminal as usual.
