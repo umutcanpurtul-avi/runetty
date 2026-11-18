@@ -5,7 +5,7 @@ edition = "2021"
 rust-version = "1.92"
 description = "SSH session manager and terminal for Linux"
 license = "MIT"
-repository = "https://github.com/umutcanpurtul/runetty"
+repository = "https://github.com/umutcanpurtul-avi/runetty"
 
 # Taban: Ubuntu 24.04 LTS (GTK 4.14 / libadwaita 1.5 / VTE 0.76).
 # Daha eskisi (Debian 12, Rocky 9, Ubuntu 22.04) Flatpak ile desteklenir.
