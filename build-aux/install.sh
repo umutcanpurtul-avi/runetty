@@ -10,12 +10,12 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 }
 
 install -Dm755 "$root/target/release/runetty" "$PREFIX/bin/runetty"
-install -Dm644 "$root/data/dev.runetty.Runetty.desktop" \
-  "$PREFIX/share/applications/dev.runetty.Runetty.desktop"
-install -Dm644 "$root/data/dev.runetty.Runetty.metainfo.xml" \
-  "$PREFIX/share/metainfo/dev.runetty.Runetty.metainfo.xml"
-install -Dm644 "$root/data/icons/dev.runetty.Runetty.svg" \
-  "$PREFIX/share/icons/hicolor/scalable/apps/dev.runetty.Runetty.svg"
+install -Dm644 "$root/data/io.github.umutcanpurtul_avi.runetty.desktop" \
+  "$PREFIX/share/applications/io.github.umutcanpurtul_avi.runetty.desktop"
+install -Dm644 "$root/data/io.github.umutcanpurtul_avi.runetty.metainfo.xml" \
+  "$PREFIX/share/metainfo/io.github.umutcanpurtul_avi.runetty.metainfo.xml"
+install -Dm644 "$root/data/icons/io.github.umutcanpurtul_avi.runetty.svg" \
+  "$PREFIX/share/icons/hicolor/scalable/apps/io.github.umutcanpurtul_avi.runetty.svg"
 
 command -v gtk-update-icon-cache >/dev/null &&
   gtk-update-icon-cache -qtf "$PREFIX/share/icons/hicolor" 2>/dev/null || true

@@ -8,6 +8,9 @@
 use libsecret::{Schema, SchemaAttributeType, SchemaFlags};
 use std::collections::HashMap;
 
+/// Deliberately not the application ID. The ID changed when the app moved to
+/// a GitHub-based one for Flathub, and passwords already in the keyring are
+/// filed under this name; renaming the schema would lose them.
 const SCHEMA_NAME: &str = "dev.runetty.Runetty.Password";
 const ATTR_ALIAS: &str = "alias";
 

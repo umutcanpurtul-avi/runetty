@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>dev.runetty.Runetty</id>
+  <id>io.github.umutcanpurtul_avi.runetty</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
 
   <name>runetty</name>
   <summary>Manage SSH sessions, long-running jobs and server health</summary>
 
-  <developer id="dev.runetty">
+  <developer id="io.github.umutcanpurtul_avi">
     <name>Umutcan Purtul</name>
   </developer>
 
@@ -35,7 +35,7 @@
     </ul>
   </description>
 
-  <launchable type="desktop-id">dev.runetty.Runetty.desktop</launchable>
+  <launchable type="desktop-id">io.github.umutcanpurtul_avi.runetty.desktop</launchable>
 
   <screenshots>
     <screenshot type="default">
@@ -86,6 +86,17 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.3.0" date="2026-11-18">
+      <description>
+        <p>
+          The application ID is now io.github.umutcanpurtul_avi.runetty, which
+          is how Flathub verifies ownership without a domain name. A Flatpak
+          installed under the old ID should be removed and reinstalled; your
+          records and saved passwords are kept.
+        </p>
+      </description>
+      <url type="details">https://github.com/umutcanpurtul-avi/runetty/releases/tag/v0.3.0</url>
+    </release>
     <release version="0.2.0" date="2026-11-18">
       <description>
         <p>

@@ -1,17 +1,17 @@
 # Flathub submission
 
 The manifest here is the one submitted to Flathub. It differs from
-`../dev.runetty.Runetty.yaml` in a single respect: the source is a pinned git
+`../io.github.umutcanpurtul_avi.runetty.yaml` in a single respect: the source is a pinned git
 tag rather than the working directory, which Flathub requires. Keep the two in
 step whenever either changes.
 
 ## Releasing a new version
 
 1. Bump `version` in `Cargo.toml` and add a `<release>` entry to
-   `data/dev.runetty.Runetty.metainfo.xml`, then validate it:
+   `data/io.github.umutcanpurtul_avi.runetty.metainfo.xml`, then validate it:
 
    ```bash
-   appstreamcli validate data/dev.runetty.Runetty.metainfo.xml
+   appstreamcli validate data/io.github.umutcanpurtul_avi.runetty.metainfo.xml
    ```
 
 2. Regenerate the vendored cargo sources, since `Cargo.lock` has changed:
@@ -35,7 +35,7 @@ step whenever either changes.
 
    ```bash
    flatpak run org.flatpak.Builder --user --force-clean --disable-rofiles-fuse \
-       --install-deps-from=flathub build build-aux/flathub/dev.runetty.Runetty.yaml
+       --install-deps-from=flathub build build-aux/flathub/io.github.umutcanpurtul_avi.runetty.yaml
    ```
 
 5. Open a pull request against

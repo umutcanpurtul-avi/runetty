@@ -1,3 +1,7 @@
+# The manifest as submitted to Flathub: identical to the one beside it except
+# that the source is a pinned tag rather than the working directory, which
+# Flathub requires. Keep the two in step when either changes.
+#
 # Flatpak is runetty's primary distribution format.
 # Reason: GTK and libadwaita versions diverge widely across distributions
 # (GTK 4.6 on Rocky 9, 4.20+ on Arch). The runtime pins them.
@@ -6,11 +10,11 @@
 #   flatpak install -y flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
 #       org.freedesktop.Sdk.Extension.rust-stable//25.08
 #   python3 build-aux/flatpak-cargo-generator.py Cargo.lock -o build-aux/cargo-sources.json
-#   flatpak-builder --user --install --force-clean build build-aux/dev.runetty.Runetty.yaml
+#   flatpak-builder --user --install --force-clean build build-aux/io.github.umutcanpurtul_avi.runetty.yaml
 #
 # flatpak-cargo-generator.py: https://github.com/flatpak/flatpak-builder-tools
 
-id: dev.runetty.Runetty
+id: io.github.umutcanpurtul_avi.runetty
 runtime: org.gnome.Platform
 runtime-version: '50'
 sdk: org.gnome.Sdk
@@ -65,13 +69,15 @@ modules:
       - cargo --offline fetch --manifest-path Cargo.toml --verbose
       - cargo --offline build --release --verbose
       - install -Dm755 target/release/runetty /app/bin/runetty
-      - install -Dm644 data/dev.runetty.Runetty.desktop
-          /app/share/applications/dev.runetty.Runetty.desktop
-      - install -Dm644 data/dev.runetty.Runetty.metainfo.xml
-          /app/share/metainfo/dev.runetty.Runetty.metainfo.xml
-      - install -Dm644 data/icons/dev.runetty.Runetty.svg
-          /app/share/icons/hicolor/scalable/apps/dev.runetty.Runetty.svg
+      - install -Dm644 data/io.github.umutcanpurtul_avi.runetty.desktop
+          /app/share/applications/io.github.umutcanpurtul_avi.runetty.desktop
+      - install -Dm644 data/io.github.umutcanpurtul_avi.runetty.metainfo.xml
+          /app/share/metainfo/io.github.umutcanpurtul_avi.runetty.metainfo.xml
+      - install -Dm644 data/icons/io.github.umutcanpurtul_avi.runetty.svg
+          /app/share/icons/hicolor/scalable/apps/io.github.umutcanpurtul_avi.runetty.svg
     sources:
-      - type: dir
-        path: ..
+      - type: git
+        url: https://github.com/umutcanpurtul-avi/runetty.git
+        tag: v0.2.0
+        commit: cd5d8231f96428b247436cb213c2d1ddfce40da1
       - cargo-sources.json

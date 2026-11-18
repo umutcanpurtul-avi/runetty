@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="data/icons/dev.runetty.Runetty.svg" width="96" alt="runetty logo">
+<img src="data/icons/io.github.umutcanpurtul_avi.runetty.svg" width="96" alt="runetty logo">
 
 # runetty
 
@@ -110,8 +110,8 @@ It pins GTK, libadwaita and VTE to the same versions everywhere.
 git clone https://github.com/umutcanpurtul-avi/runetty && cd runetty
 flatpak install -y flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
     org.freedesktop.Sdk.Extension.rust-stable//25.08
-flatpak-builder --user --install --force-clean build build-aux/dev.runetty.Runetty.yaml
-flatpak run dev.runetty.Runetty
+flatpak-builder --user --install --force-clean build build-aux/io.github.umutcanpurtul_avi.runetty.yaml
+flatpak run io.github.umutcanpurtul_avi.runetty
 ```
 
 ### Option B — Native build

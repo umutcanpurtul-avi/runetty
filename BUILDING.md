@@ -45,8 +45,8 @@ flatpak install -y flathub org.gnome.Platform//50 org.gnome.Sdk//50 \
 pip install --user aiohttp toml tomlkit   # for flatpak-cargo-generator
 curl -LO https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
 python3 flatpak-cargo-generator.py Cargo.lock -o build-aux/cargo-sources.json
-flatpak-builder --user --install --force-clean build build-aux/dev.runetty.Runetty.yaml
-flatpak run dev.runetty.Runetty
+flatpak-builder --user --install --force-clean build build-aux/io.github.umutcanpurtul_avi.runetty.yaml
+flatpak run io.github.umutcanpurtul_avi.runetty
 ```
 
 The runtime is pinned to GNOME 50: the same GTK 4.20 / libadwaita 1.8 on

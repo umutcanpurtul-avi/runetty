@@ -59,7 +59,7 @@ pub fn build(
     widget.set_halign(gtk::Align::Center);
     widget.set_margin_bottom(48);
 
-    let icon = gtk::Image::from_icon_name("dev.runetty.Runetty");
+    let icon = gtk::Image::from_icon_name(crate::config::APP_ID);
     icon.set_pixel_size(48);
     icon.set_margin_bottom(14);
     widget.append(&icon);

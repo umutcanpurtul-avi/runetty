@@ -119,7 +119,7 @@ main() {
        warn "    rustup default stable" ;;
     2) warn "VTE is missing or too old. Build without the terminal:"
        warn "    cargo build --release --no-default-features"
-       warn "For the full build use Flatpak: flatpak install flathub dev.runetty.Runetty" ;;
+       warn "For the full build use Flatpak: flatpak install flathub io.github.umutcanpurtul_avi.runetty" ;;
     *) die  "GTK or libadwaita is too old. Use Flatpak on this distribution (see BUILDING.md)." ;;
   esac
 }

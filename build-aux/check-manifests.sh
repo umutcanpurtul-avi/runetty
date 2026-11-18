@@ -4,8 +4,8 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-local_manifest="$root/build-aux/dev.runetty.Runetty.yaml"
-flathub_manifest="$root/build-aux/flathub/dev.runetty.Runetty.yaml"
+local_manifest="$root/build-aux/io.github.umutcanpurtul_avi.runetty.yaml"
+flathub_manifest="$root/build-aux/flathub/io.github.umutcanpurtul_avi.runetty.yaml"
 
 # Strip comments, the source block of the runetty module, and blank lines:
 # what remains must be identical.
