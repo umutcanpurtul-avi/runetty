@@ -53,6 +53,7 @@ modules:
       - type: git
         url: https://gitlab.gnome.org/GNOME/vte.git
         tag: '0.78.4'
+        commit: 0fb946dd96b2c30195f4fa2d63bcfa741cac38a3
     cleanup:
       - /include
       - /lib/pkgconfig
