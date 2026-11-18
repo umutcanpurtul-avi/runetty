@@ -10,6 +10,7 @@
 pub mod agents;
 pub mod hostkey;
 pub mod metrics;
+pub mod palette;
 pub mod secrets;
 pub mod settings;
 pub mod sessions;

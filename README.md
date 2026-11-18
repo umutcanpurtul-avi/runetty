@@ -25,7 +25,7 @@ Phase 1 — visual skeleton, plus a working data and monitoring layer.
 - [x] Monitor: opt-in per host, CPU/MEM/DISK rings, expandable detail
 - [x] Light / dark / system theme, font family and size
 - [x] Multi-distribution builds: Flatpak, four package managers, CI
-- [ ] Command palette (Ctrl K)
+- [x] Command palette (Ctrl K), fuzzy matching over servers and commands
 - [ ] Agent panel wired to a real source
 
 ## Quick start

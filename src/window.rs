@@ -13,8 +13,8 @@ use crate::data::sessions::{self, Sessions};
 use crate::data::settings::{Settings, Theme};
 use crate::data::store::Store;
 use crate::ui::{
-    agents, empty_state, host_dialog, icon_rail, monitor, preferences, shortcuts, sidebar,
-    trust_dialog,
+    agents, empty_state, host_dialog, icon_rail, monitor, palette, preferences, shortcuts,
+    sidebar, trust_dialog,
 };
 
 pub fn build(
@@ -1027,9 +1027,13 @@ fn install_actions(w: Wiring) {
     }
     add(&select_tab);
 
-    let palette = gio::SimpleAction::new("command-palette", None);
-    palette.connect_activate(|_, _| glib::g_debug!("runetty", "TODO: command palette"));
-    add(&palette);
+    let command_palette = gio::SimpleAction::new("command-palette", None);
+    {
+        let window = window.clone();
+        let store = Rc::clone(w.store);
+        command_palette.connect_activate(move |_, _| palette::present(&window, &store));
+    }
+    add(&command_palette);
 }
 
 /// Places a pinned Monitor in the right-hand column. Idempotent: it leaves

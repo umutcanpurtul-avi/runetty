@@ -2,6 +2,7 @@ pub mod agents;
 pub mod empty_state;
 pub mod host_dialog;
 pub mod icon_rail;
+pub mod palette;
 pub mod preferences;
 pub mod ring;
 pub mod monitor;

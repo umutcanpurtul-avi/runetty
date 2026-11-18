@@ -304,8 +304,7 @@ tabbar.runetty tabbox > tab:checked {
   padding: 6px 8px;
 }
 
-/* reset the listbox: no frame, no background of its own */
-.sidebar-pane listbox,
+/* reset the list: no frame, no background of its own */
 .sidebar-pane list {
   background: none;
   border: none;
@@ -509,3 +508,34 @@ levelbar.meter block.filled {
 
 levelbar.meter-warn  block.filled { background-color: @state_blocked; }
 levelbar.meter-alert block.filled { background-color: @state_closed; }
+
+/* --- command palette --- */
+
+.palette {
+  padding: 12px;
+}
+
+.palette .command-field {
+  min-width: 0;
+}
+
+/* GTK4 names the GtkListBox node `list`, not `listbox`. */
+list.palette-list,
+list.palette-list row {
+  background: none;
+  padding: 0;
+}
+
+/* The stock selection paints the row in the accent colour; the palette
+ * marks the current hit with the same tone the lists use instead. */
+list.palette-list row:selected {
+  background: none;
+  color: inherit;
+  box-shadow: none;
+}
+
+list.palette-list row:selected .session-row,
+list.palette-list row:focus .session-row {
+  background-color: @bg_active;
+  box-shadow: inset 2px 0 0 @accent;
+}
