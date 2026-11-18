@@ -78,6 +78,6 @@ modules:
     sources:
       - type: git
         url: https://github.com/umutcanpurtul-avi/runetty.git
-        tag: v0.2.0
-        commit: cd5d8231f96428b247436cb213c2d1ddfce40da1
+        tag: v0.3.0
+        commit: 5ea3a11247f26d7bcbf517e82f6d3f7b38518b05
       - cargo-sources.json
