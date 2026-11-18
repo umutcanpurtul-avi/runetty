@@ -26,7 +26,7 @@ jobs:
         run: |
           set -eux
           if command -v pacman >/dev/null; then
-            pacman -Sy --noconfirm --needed git curl
+            pacman -Syu --noconfirm --needed git curl
           else
             apt-get update
             apt-get install -y --no-install-recommends git curl ca-certificates sudo
@@ -73,10 +73,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends appstream desktop-file-utils
 
       - name: AppStream metainfo
-        run: appstreamcli validate data/dev.runetty.Runetty.metainfo.xml
+        run: appstreamcli validate data/io.github.umutcanpurtul_avi.runetty.metainfo.xml
 
       - name: Desktop entry
-        run: desktop-file-validate data/dev.runetty.Runetty.desktop
+        run: desktop-file-validate data/io.github.umutcanpurtul_avi.runetty.desktop
 
       - name: Manifests agree
         run: ./build-aux/check-manifests.sh
@@ -110,4 +110,4 @@ jobs:
             https://flathub.org/repo/flathub.flatpakrepo
           flatpak-builder --user --force-clean --disable-rofiles-fuse \
             --install-deps-from=flathub \
-            flatpak-build build-aux/dev.runetty.Runetty.yaml
+            flatpak-build build-aux/io.github.umutcanpurtul_avi.runetty.yaml
